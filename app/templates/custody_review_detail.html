@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% from "_macros.html" import status_pill %}
+{% block title %}عهدة {{ c.id }}{% endblock %}
+{% block mtitle %}عهدة {{ c.id }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/admin/custody-review">مراجعة العهد</a> / عهدة <bdi dir="ltr">#{{ c.id }}</bdi></div>
+<div class="page-head">
+  <h1>{{ c.name }} <span class="muted" style="font-weight:500"><bdi dir="ltr">#{{ c.id }}</bdi></span></h1>
+  {% if not c.active %}<span class="pill closed">موقوفة</span>{% endif %}
+  <div class="actions"><a class="btn" href="/admin/reports?tab=invoices&custody_id={{ c.id }}&date_from={{ f.date_from }}&date_to={{ f.date_to }}">{{ icon('chart', 18) }} في التقارير</a>
+    <a class="btn" href="/admin/custodies">تعديل العهدة</a></div>
+  <p class="muted">{{ c.full_name }}{% if c.department_name %} · قسم {{ c.department_name }}{% endif %} · مبلغ أسبوعي {{ c.weekly_amount|money }} · حد الفاتورة {{ c.per_invoice_limit|money }}</p>
+</div>
+
+<form class="card filters" method="get">
+  <div class="field"><label>من تاريخ</label><input type="date" name="date_from" value="{{ f.date_from }}"></div>
+  <div class="field"><label>إلى تاريخ</label><input type="date" name="date_to" value="{{ f.date_to }}"></div>
+  <div class="field"><label>حالة الفواتير</label><select name="status">
+    {% for k, l in [('active','معتمدة + مستنية'),('pending','مستنية'),('approved','معتمدة'),('rejected','مرفوضة'),('all','الكل')] %}
+    <option value="{{ k }}" {% if f.status == k %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+  <div class="field"><button class="btn primary" style="width:100%">{{ icon('filter', 18) }} عرض</button></div>
+</form>
+
+<div class="grid">
+  <div class="card kpi accent"><div class="label">إجمالي العهدة في الفترة</div><div class="value num">{{ s.opening|money }}<small>ريال</small></div>
+    <div class="sub">{{ weeks|length }} أسبوع (أي أسبوع فيه جزء من الفترة)</div></div>
+  <div class="card kpi"><div class="label">المصروف</div><div class="value num">{{ s.spent|money }}</div><div class="sub">منه ضريبة {{ s.vat|money }}</div></div>
+  <div class="card kpi"><div class="label">المتبقي</div><div class="value num" {% if s.remaining < 0 %}style="color:var(--danger)"{% endif %}>{{ s.remaining|money }}</div></div>
+  <div class="card kpi"><div class="label">الفواتير المربوطة بالبيان</div><div class="value num">{{ s.linked }} <small>من {{ s.n }}</small></div>
+    <div class="sub">{% if s.over %}<span style="color:var(--danger)">{{ s.over }} فوق الحد</span>{% else %}مفيش فواتير فوق الحد{% endif %}</div></div>
+</div>
+
+<h2>الأسابيع</h2>
+<div class="card table-wrap"><table>
+  <thead><tr><th>الأسبوع</th><th>الحالة</th><th>مبلغ العهدة</th><th>المصروف</th><th>المتبقي</th><th class="hide-sm">الفواتير</th><th class="hide-sm">البيان</th><th></th></tr></thead>
+  <tbody>{% for r in weeks %}{% set w = r.week %}<tr>
+    <td class="num">{{ w.start_date }} ← {{ w.end_date }}</td>
+    <td><span class="pill {{ w.status }}">{{ 'مفتوح' if w.status == 'open' else 'مقفول' }}</span></td>
+    <td class="num">{{ r.totals.opening|money }}</td><td class="num">{{ r.totals.spent|money }}</td>
+    <td class="num" {% if r.totals.remaining < 0 %}style="color:var(--danger)"{% endif %}>{{ r.totals.remaining|money }}</td>
+    <td class="hide-sm num">{{ r.totals.count }}{% if r.totals.pending_count %} <span class="pill pending">{{ r.totals.pending_count }} مستنية</span>{% endif %}</td>
+    <td class="hide-sm">{% if not w.lines %}<span class="muted small">لسه</span>{% elif w.linked == w.lines %}<span class="pill approved">{{ w.linked }}/{{ w.lines }} مربوط</span>{% else %}<span class="pill pending">{{ w.linked }}/{{ w.lines }} مربوط</span>{% endif %}</td>
+    <td><a class="btn sm" href="/weeks/{{ w.id }}">فتح</a></td></tr>
+  {% else %}<tr><td colspan="8" class="empty">مفيش أسابيع في الفترة دي</td></tr>{% endfor %}</tbody>
+</table></div>
+
+<h2>الفواتير</h2>
+<div class="card table-wrap"><table>
+  <thead><tr><th>#</th><th>التاريخ</th><th>المورد</th><th class="hide-sm">رقم الفاتورة</th><th class="hide-sm">التصنيف</th><th class="hide-sm">القسم</th>
+    <th>سطر البيان المربوط</th><th>الإجمالي</th><th>الحالة</th></tr></thead>
+  <tbody>{% for i in invoices %}<tr>
+    <td><a href="/invoices/{{ i.id }}">{{ i.id }}</a></td><td class="num">{{ i.d }}</td><td>{{ i.vendor_name or '-' }}</td>
+    <td class="hide-sm">{{ i.invoice_number or '-' }}</td><td class="hide-sm">{{ i.category_name or '-' }}</td><td class="hide-sm">{{ i.department_name or '-' }}</td>
+    <td>{% if i.statement_line %}<span class="small">{{ icon('check', 13) }} {{ i.statement_line[:50] }}</span>{% elif i.status == 'rejected' %}<span class="muted small">-</span>{% else %}<a class="small" href="/weeks/{{ i.week_id }}/reconcile" style="color:var(--warn)">مش مربوطة</a>{% endif %}</td>
+    <td class="num">{{ i.total|money }}</td>
+    <td>{{ status_pill(i.status) }}{% if i.over_limit %} <span class="pill flag">فوق الحد</span>{% endif %}</td></tr>
+  {% else %}<tr><td colspan="9" class="empty">مفيش فواتير</td></tr>{% endfor %}</tbody>
+  {% if invoices %}<tfoot><tr><td colspan="7">الإجمالي ({{ invoices|length }} فاتورة)</td><td class="num">{{ s.total|money }}</td><td></td></tr></tfoot>{% endif %}
+</table></div>
+{% endblock %}

@@ -19,3 +19,13 @@ def test_lists_and_reports(admin):
 def test_reports_admin_only(emp):
     assert emp.get("/admin/reports").status_code == 403
     assert emp.get("/admin/lists").status_code == 403
+
+
+def test_custody_review(admin):
+    r = admin.get("/admin/custody-review")
+    assert r.status_code == 200
+    assert admin.get("/admin/custody-review?q=أحمد").status_code == 200
+    r = admin.get("/admin/custody-review?q=1", follow_redirects=False)
+    assert r.status_code in (200, 303)
+    assert admin.get("/admin/custody-review/1").status_code == 200
+    assert admin.get("/admin/custody-review/99999").status_code == 404

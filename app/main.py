@@ -497,9 +497,13 @@ def load_week(db, week_id: int, user):
 
 def week_invoices(db, week_id: int):
     return db.execute(
-        """SELECT i.*, v.name AS vendor_name, v.vat_number, cat.name AS category_name
+        """SELECT i.*, v.name AS vendor_name, v.vat_number, cat.name AS category_name,
+                  dep.name AS department_name,
+                  (SELECT s.line_no || '. ' || s.description FROM statement_lines s
+                     WHERE s.invoice_id=i.id LIMIT 1) AS statement_line
            FROM invoices i LEFT JOIN vendors v ON v.id=i.vendor_id
            LEFT JOIN categories cat ON cat.id=i.category_id
+           LEFT JOIN departments dep ON dep.id=i.department_id
            WHERE i.week_id=? AND i.status<>'draft' ORDER BY i.invoice_date, i.id""",
         (week_id,),
     ).fetchall()
@@ -1170,6 +1174,128 @@ def admin_weeks(request: Request, status: str = "open"):
         ).fetchall()
         rows = [{"week": w, "totals": dbm.week_totals(db, w["id"])} for w in weeks]
         return render(request, db, "admin_weeks.html", user=admin, rows=rows, status=status)
+
+
+@app.get("/admin/custody-review")
+def custody_review(request: Request, q: str = "", user_id: str = "", department_id: str = "",
+                   active: str = "1", attention: str = ""):
+    """مراجعة العهد: كل العهد في جدول، والضغط على أي عهدة بيفتح تفاصيلها.
+    q: رقم العهدة أو اسم الموظف أو اسم العهدة."""
+    with get_db() as db:
+        admin = require_admin(request, db)
+        q = " ".join(q.split())
+        number = q.lstrip("#").upper().removeprefix("C-").strip()
+        where, params = ["1=1"], []
+        if number.isdigit():
+            where.append("c.id=?")
+            params.append(int(number))
+        elif q:
+            where.append("(u.full_name LIKE ? OR c.name LIKE ? OR u.username LIKE ?)")
+            params += [f"%{q}%"] * 3
+        else:
+            number = ""
+        if user_id.isdigit():
+            where.append("c.user_id=?")
+            params.append(int(user_id))
+        if department_id.isdigit():
+            where.append("c.department_id=?")
+            params.append(int(department_id))
+        if active in ("0", "1"):
+            where.append("c.active=?")
+            params.append(int(active))
+        custodies = db.execute(
+            f"""SELECT c.*, u.full_name, d.name AS department_name,
+                       (SELECT id FROM weeks w WHERE w.custody_id=c.id ORDER BY w.start_date DESC LIMIT 1) AS last_week_id,
+                       (SELECT COUNT(*) FROM weeks w WHERE w.custody_id=c.id) AS weeks,
+                       (SELECT COUNT(*) FROM invoices i WHERE i.custody_id=c.id AND i.status IN ('pending','approved')) AS n,
+                       (SELECT COALESCE(SUM(total),0) FROM invoices i WHERE i.custody_id=c.id AND i.status IN ('pending','approved')) AS spent_all,
+                       (SELECT COUNT(*) FROM invoices i WHERE i.custody_id=c.id AND i.status='pending') AS pending,
+                       (SELECT COUNT(*) FROM invoices i WHERE i.custody_id=c.id AND i.over_limit=1 AND i.status!='rejected') AS over,
+                       (SELECT COUNT(*) FROM statement_lines s JOIN weeks w ON w.id=s.week_id
+                          WHERE w.custody_id=c.id AND s.invoice_id IS NULL) AS unmatched_lines
+                FROM custodies c JOIN users u ON u.id=c.user_id LEFT JOIN departments d ON d.id=c.department_id
+                WHERE {' AND '.join(where)} ORDER BY c.active DESC, u.full_name""", params).fetchall()
+        rows = []
+        for c in custodies:
+            week = db.execute("SELECT * FROM weeks WHERE id=?", (c["last_week_id"],)).fetchone() if c["last_week_id"] else None
+            totals = dbm.week_totals(db, week["id"]) if week else None
+            issues = []
+            if c["pending"]:
+                issues.append(f"{c['pending']} فاتورة مستنية")
+            if c["over"]:
+                issues.append(f"{c['over']} فوق الحد")
+            if c["unmatched_lines"]:
+                issues.append(f"{c['unmatched_lines']} سطر بيان من غير فاتورة")
+            if totals and totals["remaining"] < 0:
+                issues.append("صرف أكتر من العهدة")
+            if attention and not issues:
+                continue
+            rows.append({"c": c, "week": week, "totals": totals, "issues": issues})
+        if number.isdigit() and len(rows) == 1:
+            return go(f"/admin/custody-review/{rows[0]['c']['id']}")
+        users = db.execute("SELECT DISTINCT u.id, u.full_name FROM users u JOIN custodies c ON c.user_id=u.id "
+                           "ORDER BY u.full_name").fetchall()
+        return render(request, db, "custody_review.html", user=admin, rows=rows, users=users,
+                      departments=departments(db, include_inactive=True),
+                      f={"q": q, "user_id": user_id, "department_id": department_id,
+                         "active": active, "attention": attention})
+
+
+@app.get("/admin/custody-review/{custody_id}")
+def custody_review_detail(request: Request, custody_id: int, date_from: str = "", date_to: str = "",
+                          status: str = "active"):
+    with get_db() as db:
+        admin = require_admin(request, db)
+        c = db.execute(
+            """SELECT c.*, u.full_name, u.username, d.name AS department_name FROM custodies c
+               JOIN users u ON u.id=c.user_id LEFT JOIN departments d ON d.id=c.department_id WHERE c.id=?""",
+            (custody_id,)).fetchone()
+        if not c:
+            raise HTTPException(404, "العهدة مش موجودة")
+        wwhere, wparams = ["w.custody_id=?"], [custody_id]
+        if date_from:
+            wwhere.append("w.end_date>=?")
+            wparams.append(date_from)
+        if date_to:
+            wwhere.append("w.start_date<=?")
+            wparams.append(date_to)
+        weeks = db.execute(
+            f"""SELECT w.*, (SELECT COUNT(*) FROM statement_lines s WHERE s.week_id=w.id) AS lines,
+                       (SELECT COUNT(*) FROM statement_lines s WHERE s.week_id=w.id AND s.invoice_id IS NOT NULL) AS linked
+                FROM weeks w WHERE {' AND '.join(wwhere)} ORDER BY w.start_date DESC""", wparams).fetchall()
+        week_rows = [{"week": w, "totals": dbm.week_totals(db, w["id"])} for w in weeks]
+        statuses = {"active": ("pending", "approved"), "pending": ("pending",), "approved": ("approved",),
+                    "rejected": ("rejected",), "all": ("pending", "approved", "rejected")}.get(status, ("pending", "approved"))
+        iwhere = [f"i.custody_id=?", f"i.status IN ({','.join('?' * len(statuses))})"]
+        iparams: list = [custody_id, *statuses]
+        date_sql = "COALESCE(NULLIF(i.invoice_date,''), substr(i.created_at,1,10))"
+        if date_from:
+            iwhere.append(f"{date_sql}>=?")
+            iparams.append(date_from)
+        if date_to:
+            iwhere.append(f"{date_sql}<=?")
+            iparams.append(date_to)
+        invoices = db.execute(
+            f"""SELECT i.*, {date_sql} AS d, v.name AS vendor_name, cat.name AS category_name,
+                       dep.name AS department_name, w.start_date AS week_start,
+                       (SELECT s.line_no || '. ' || s.description FROM statement_lines s
+                          WHERE s.invoice_id=i.id LIMIT 1) AS statement_line
+                FROM invoices i JOIN weeks w ON w.id=i.week_id LEFT JOIN vendors v ON v.id=i.vendor_id
+                LEFT JOIN categories cat ON cat.id=i.category_id LEFT JOIN departments dep ON dep.id=i.department_id
+                WHERE {' AND '.join(iwhere)} ORDER BY d DESC, i.id DESC LIMIT 1000""", iparams).fetchall()
+        live = [i for i in invoices if i["status"] in ("pending", "approved")]
+        summary = {
+            "opening": sum(r["totals"]["opening"] for r in week_rows),
+            "spent": sum(r["totals"]["spent"] for r in week_rows),
+            "n": len(live), "total": sum(i["total"] or 0 for i in invoices),
+            "vat": sum(i["vat_amount"] or 0 for i in invoices),
+            "linked": sum(1 for i in live if i["statement_line"]),
+            "over": sum(1 for i in invoices if i["over_limit"] and i["status"] != "rejected"),
+        }
+        summary["remaining"] = summary["opening"] - summary["spent"]
+        return render(request, db, "custody_review_detail.html", user=admin, c=c, weeks=week_rows,
+                      invoices=invoices, s=summary,
+                      f={"date_from": date_from, "date_to": date_to, "status": status})
 
 
 @app.get("/admin/vendors")

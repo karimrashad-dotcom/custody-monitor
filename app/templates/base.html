@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap">
-  <link rel="stylesheet" href="/static/style.css?v=3">
+  <link rel="stylesheet" href="/static/style.css?v=4">
 </head>
 <body class="{{ 'has-nav' if user else 'no-nav' }} {{ 'is-admin' if user and user.role == 'admin' else 'is-emp' }}">
 {% if user %}
@@ -29,12 +29,13 @@
       <div class="nav-group">الإدارة</div>
       {{ nav('/admin', 'الرئيسية', 'home', exact=true) }}
       {{ nav('/admin/invoices', 'الفواتير', 'receipt') }}
+      {{ nav('/admin/custody-review', 'مراجعة العهد', 'wallet') }}
       {{ nav('/admin/weeks', 'الأسابيع', 'calendar') }}
       {{ nav('/admin/reports', 'التقارير', 'chart') }}
       {{ nav('/admin/vendors', 'الموردين', 'store') }}
       {{ nav('/admin/alerts', 'التنبيهات', 'bell', unread_alerts) }}
       <div class="nav-group">الإعداد</div>
-      {{ nav('/admin/custodies', 'العهد', 'wallet') }}
+      {{ nav('/admin/custodies', 'إعداد العهد', 'settings') }}
       {{ nav('/admin/users', 'الموظفين', 'users') }}
       {{ nav('/admin/lists', 'التصنيفات والأقسام', 'tags') }}
       {{ nav('/admin/settings', 'الإعدادات', 'settings') }}
