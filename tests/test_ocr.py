@@ -97,3 +97,27 @@ def test_ocr_on_camera_photo():
     r = extract.extract_invoice(*extract.prepare_image(raw), original_bytes=raw, photo=True)
     assert r.total == 345.0 and r.vat_amount == 45.0
     assert r.vendor_vat_number == "310455667700003"
+
+
+def test_scan_document_crops_photo():
+    import cv2
+    W, H = 3000, 2200
+    img = np.full((H, W, 3), (60, 80, 100), np.uint8)
+    pts = np.array([[900, 300], [2000, 380], [1950, 1950], [850, 1880]], np.int32)
+    cv2.fillPoly(img, [pts], (235, 235, 230))
+    ok, buf = cv2.imencode(".jpg", img)
+    out, cropped = ocr.scan_document(buf.tobytes())
+    assert cropped
+    res = cv2.imdecode(np.frombuffer(out, np.uint8), cv2.IMREAD_GRAYSCALE)
+    h, w = res.shape
+    assert 1000 < w < 1300 and 1450 < h < 1700  # اتقصت الورقة بس
+    assert res.mean() > 200  # من غير الخلفية الغامقة
+
+
+def test_scan_document_manual_corners():
+    import cv2
+    img = np.full((1000, 1000, 3), 240, np.uint8)  # ورقة على ورق أبيض: مفيش حدود واضحة
+    ok, buf = cv2.imencode(".jpg", img)
+    out, cropped = ocr.scan_document(buf.tobytes(), [(0.1, 0.1), (0.6, 0.1), (0.6, 0.9), (0.1, 0.9)])
+    res = cv2.imdecode(np.frombuffer(out, np.uint8), cv2.IMREAD_GRAYSCALE)
+    assert cropped and abs(res.shape[1] - 500) < 15 and abs(res.shape[0] - 800) < 15

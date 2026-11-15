@@ -163,3 +163,23 @@ def test_claude_path(monkeypatch):
     assert res.items[0]["unit_price"] == 50
     assert captured["model"] == "claude-haiku-5-5" and "fallbacks" not in captured
     assert captured["output_config"]["format"]["type"] == "json_schema"
+
+
+def test_qr_small_in_camera_photo():
+    """كود QR صغير في صورة كاميرا كبيرة فيها كلام وخلفية: لازم يتلقط."""
+    payload = tlv("HOTPACK", "302006770500003", "2026-11-04T18:12:35", "1449.00", "189.00")
+    qr = cv2.QRCodeEncoder.create().encode(payload)
+    qr = cv2.resize(qr, None, fx=4, fy=4, interpolation=cv2.INTER_NEAREST)
+    qr = cv2.copyMakeBorder(qr, 12, 12, 12, 12, cv2.BORDER_CONSTANT, value=255)
+    rng = np.random.default_rng(3)
+    photo = np.clip(rng.normal(150, 40, (3000, 4000)), 0, 255).astype(np.uint8)
+    photo[300:2700, 900:3100] = 235
+    for y in range(400, 2600, 60):  # سطور كلام
+        photo[y:y + 18, 1000:3000:7] = 30
+    h, w = qr.shape
+    photo[700:700 + h, 2500:2500 + w] = qr
+    photo = cv2.GaussianBlur(photo, (3, 3), 0)
+    ok, buf = cv2.imencode(".jpg", photo, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    raw = buf.tobytes()
+    res = extract.extract_invoice(*extract.prepare_image(raw), original_bytes=raw, photo=True)
+    assert "qr" in res.sources and res.total == 1449.0 and res.vendor_vat_number == "302006770500003"

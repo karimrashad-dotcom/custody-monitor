@@ -16,17 +16,51 @@
         <input type="file" accept="image/*,application/pdf,.pdf" id="gal" hidden></label>
     </div>
     <input type="file" name="image" accept="image/*,application/pdf,.pdf" required id="img" style="position:absolute;opacity:0;width:1px;height:1px">
-    <img id="preview" alt="">
+    <input type="hidden" name="corners" id="corners">
+    <div class="cropper" id="cropper">
+      <img id="preview" alt="">
+      <svg id="cropsvg" preserveAspectRatio="none" viewBox="0 0 1 1"><polygon id="croppoly" points=""/></svg>
+      <span class="hnd" data-i="0"></span><span class="hnd" data-i="1"></span><span class="hnd" data-i="2"></span><span class="hnd" data-i="3"></span>
+    </div>
+    <div class="small muted" id="crophint" style="display:none;margin-top:6px">البرنامج يقص الفاتورة ويوضحها تلقائياً. لو القص غير دقيق، اسحب النقاط الأربع إلى أركان الفاتورة.</div>
   </div>
   <div style="margin-top:14px"><button class="btn primary big" id="send">اقرأ الفاتورة</button></div>
   <div class="loading" id="loading">جارٍ قراءة الفاتورة… قد يستغرق ذلك حتى 30 ثانية</div>
 </form>
 <script>
 const img = document.getElementById('img'), prev = document.getElementById('preview');
+const box = document.getElementById('cropper'), poly = document.getElementById('croppoly');
+const hnds = [...box.querySelectorAll('.hnd')], cornersIn = document.getElementById('corners');
+let pts = [], moved = false;
+function draw() {
+  poly.setAttribute('points', pts.map(p => p.join(',')).join(' '));
+  hnds.forEach((h, i) => { h.style.left = (pts[i][0] * 100) + '%'; h.style.top = (pts[i][1] * 100) + '%'; });
+  if (moved) cornersIn.value = pts.map(p => p.map(v => v.toFixed(4)).join(',')).join(';');
+}
+hnds.forEach((h, i) => {
+  h.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); h.setPointerCapture(e.pointerId);
+    const move = (ev) => {
+      const r = prev.getBoundingClientRect();
+      pts[i] = [Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (ev.clientY - r.top) / r.height))];
+      moved = true; draw();
+    };
+    h.addEventListener('pointermove', move);
+    h.addEventListener('pointerup', () => h.removeEventListener('pointermove', move), { once: true });
+  });
+});
 for (const id of ['cam', 'gal']) {
   document.getElementById(id).addEventListener('change', (e) => {
     const f = e.target.files[0]; if (!f) return;
     const dt = new DataTransfer(); dt.items.add(f); img.files = dt.files;
+    moved = false; cornersIn.value = '';
+    const isImg = (f.type || '').startsWith('image/');
+    prev.onload = () => {
+      if (!isImg) return;
+      pts = [[.04, .04], [.96, .04], [.96, .96], [.04, .96]];
+      box.classList.add('on'); document.getElementById('crophint').style.display = 'block'; draw();
+    };
+    box.classList.remove('on'); document.getElementById('crophint').style.display = 'none';
     prev.src = URL.createObjectURL(f); prev.style.display = 'block';
   });
 }

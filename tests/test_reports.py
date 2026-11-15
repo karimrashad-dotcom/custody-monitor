@@ -77,3 +77,19 @@ def test_pdf_original_kept(emp, admin):
     inv_id = re.search(r'/invoices/(\d+)/original', r.text).group(1)
     o = employee.get(f"/invoices/{inv_id}/original")
     assert o.status_code == 200 and o.content[:4] == b"%PDF"
+
+
+def test_photo_upload_scanned(emp, admin):
+    import io, re
+    import numpy as np, cv2
+    img = np.full((1500, 2000, 3), (60, 80, 100), np.uint8)
+    cv2.fillPoly(img, [np.array([[600, 200], [1400, 250], [1350, 1300], [550, 1250]], np.int32)], (235, 235, 230))
+    ok, buf = cv2.imencode(".jpg", img)
+    cid = re.search(r'<option value="(\d+)"|name="custody_id"[^>]*value="(\d+)"|value="(\d+)"[^>]*name="custody_id"', emp.get("/upload").text)
+    cid = next(g for g in cid.groups() if g)
+    r = emp.post("/upload", data={"custody_id": cid}, files={"image": ("cam.jpg", buf.tobytes(), "image/jpeg")})
+    assert "الصورة الأصلية" in r.text
+    inv_id = re.search(r'/invoices/(\d+)/original', r.text).group(1)
+    shown = cv2.imdecode(np.frombuffer(emp.get(f"/invoices/{inv_id}/image").content, np.uint8), cv2.IMREAD_GRAYSCALE)
+    assert shown.shape[0] > shown.shape[1] and shown.mean() > 200  # الورقة بس، طولية
+    assert emp.get(f"/invoices/{inv_id}/original").headers["content-type"] == "image/jpeg"

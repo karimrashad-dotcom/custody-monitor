@@ -97,6 +97,51 @@ def decode_qr(image_bytes: bytes) -> str | None:
             continue
         if text:
             return text
+    return _decode_qr_zxing(gray) or _decode_qr_tiles(detector, gray)
+
+
+def _decode_qr_zxing(gray) -> str | None:
+    """zxing-cpp (لو متثبتة) أقوى بكتير في لقط الكود من صورة كاميرا كاملة."""
+    try:
+        import zxingcpp
+    except ImportError:
+        return None
+    try:
+        for r in zxingcpp.read_barcodes(gray):
+            if r.text and "QR" in str(r.format).upper():
+                return r.text
+    except Exception:
+        log.exception("zxing")
+    return None
+
+
+def _decode_qr_tiles(detector, gray, budget: float = 4.0) -> str | None:
+    """صورة كاميرا: الكود صغير جوه الصورة، فبندور عليه في مربعات صغيرة مكبّرة."""
+    import time
+
+    import cv2
+
+    start = time.monotonic()
+    h, w = gray.shape[:2]
+    if max(h, w) > 2400:
+        s = 2400 / max(h, w)
+        gray = cv2.resize(gray, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
+        h, w = gray.shape[:2]
+    for frac in (0.3, 0.22, 0.4):
+        t = int(min(h, w) * frac)
+        step = max(1, t // 3)
+        for y in range(0, max(1, h - t + 1), step):
+            for x in range(0, max(1, w - t + 1), step):
+                if time.monotonic() - start > budget:
+                    return None
+                tile = gray[y:y + t, x:x + t]
+                for img in (tile, cv2.resize(tile, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)):
+                    try:
+                        text, _, _ = detector.detectAndDecode(img)
+                    except cv2.error:
+                        continue
+                    if text:
+                        return text
     return None
 
 
@@ -336,10 +381,13 @@ def prepare_image(raw: bytes, max_side: int = 2000) -> tuple[bytes, str]:
 def extract_invoice(image_bytes: bytes, media_type: str, api_key: str = "",
                     model: str = DEFAULT_MODEL, categories: list[str] | None = None,
                     original_bytes: bytes | None = None, pdf_text: str = "",
-                    own_company: dict | None = None, photo: bool = False) -> Extraction:
+                    own_company: dict | None = None, photo: bool = False,
+                    extra_qr: bytes | None = None) -> Extraction:
     result = Extraction()
     # QR بيتقري أحسن من الصورة الأصلية قبل التصغير
     from_qr(original_bytes or image_bytes, result)
+    if not result.sources and extra_qr:
+        from_qr(extra_qr, result)
     if not result.sources and original_bytes:
         from_qr(image_bytes, result)
     if pdf_text.strip():

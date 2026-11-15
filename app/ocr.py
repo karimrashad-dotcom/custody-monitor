@@ -87,7 +87,7 @@ GRAND_WORDS = ["شامل الضريبة", "شامل ضريبة", "بعد الض�
 NOT_GRAND = ["غير شامل", "exclusive", "before", "قبل"]
 INV_CODE_RE = re.compile(r"(?<![A-Za-z])(INV[-/ ]?\d{2,4}[-/]\d{2,8}|INV[-/]?\d{4,10})", re.IGNORECASE)
 INVOICE_NO_RE = re.compile(
-    r"(?:رقم\s*(?:ال)?فاتورة|فاتورة\s*رقم|invoice\s*(?:no|number|#)|inv\s*(?:no|#)|receipt\s*(?:no|#)|bill\s*no|رقم\s*الإيصال)"
+    r"(?:رقم\s*(?:ال)?فاتورة|فاتورة\s*رقم|inv[oa][il1]ce\s*[.:]?\s*(?:no|number|#)|inv\s*[.:]?\s*(?:no|#)|receipt\s*(?:no|#)|bill\s*no|رقم\s*الإيصال)"
     r"\s*[:#.\-]*\s*([A-Za-z0-9][A-Za-z0-9\-/]{0,24})",
     re.IGNORECASE,
 )
@@ -290,35 +290,110 @@ def _decode_gray(image_bytes: bytes):
     return img
 
 
-def crop_document(img):
-    """صورة كاميرا: نلاقي ورقة الفاتورة (أكبر شكل رباعي فاتح) ونعدل منظورها."""
+def _order(pts):
+    import numpy as np
+
+    s, d = pts.sum(1), np.diff(pts, axis=1).ravel()
+    return np.float32([pts[s.argmin()], pts[d.argmin()], pts[s.argmax()], pts[d.argmax()]])
+
+
+def find_document(gray):
+    """أركان ورقة الفاتورة في صورة الكاميرا (tl, tr, br, bl) أو None.
+
+    بنجرب طريقتين: حواف الورقة (Canny)، وبعدين أكبر منطقة فاتحة (الورقة البيضا على ترابيزة/خلفية أغمق).
+    """
     import cv2
     import numpy as np
 
-    h, w = img.shape[:2]
+    h, w = gray.shape[:2]
     scale = 1000 / max(h, w)
-    small = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
-    blur = cv2.GaussianBlur(small, (5, 5), 0)
-    edges = cv2.dilate(cv2.Canny(blur, 40, 120), np.ones((3, 3), np.uint8))
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    small = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
     area = small.shape[0] * small.shape[1]
-    for c in sorted(contours, key=cv2.contourArea, reverse=True)[:5]:
-        if cv2.contourArea(c) < area * 0.08:
-            break
-        approx = cv2.approxPolyDP(c, 0.02 * cv2.arcLength(c, True), True)
-        if len(approx) != 4:
-            continue
-        pts = approx.reshape(4, 2).astype("float32") / scale
-        s, d = pts.sum(1), np.diff(pts, axis=1).ravel()
-        tl, br, tr, bl = pts[s.argmin()], pts[s.argmax()], pts[d.argmin()], pts[d.argmax()]
-        width = int(max(np.linalg.norm(br - bl), np.linalg.norm(tr - tl)))
-        height = int(max(np.linalg.norm(tr - br), np.linalg.norm(tl - bl)))
-        if width < 300 or height < 300:
-            continue
-        M = cv2.getPerspectiveTransform(np.float32([tl, tr, br, bl]),
-                                        np.float32([[0, 0], [width, 0], [width, height], [0, height]]))
-        return cv2.warpPerspective(img, M, (width, height))
-    return img
+    blur = cv2.GaussianBlur(small, (7, 7), 0)
+
+    masks = [cv2.dilate(cv2.Canny(blur, 40, 120), np.ones((3, 3), np.uint8))]
+    _, bright = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    bright = cv2.morphologyEx(bright, cv2.MORPH_CLOSE, np.ones((25, 25), np.uint8))  # نقفل الكلام جوه الورقة
+    masks.append(bright)
+    for mask in masks:
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for c in sorted(contours, key=cv2.contourArea, reverse=True)[:3]:
+            ca = cv2.contourArea(c)
+            if ca < area * 0.08:
+                break
+            if ca > area * 0.97:  # الصورة كلها: مفيش خلفية نقصها
+                continue
+            peri = cv2.arcLength(c, True)
+            quad = None
+            for eps in (0.02, 0.03, 0.05, 0.08):
+                approx = cv2.approxPolyDP(c, eps * peri, True)
+                if len(approx) == 4 and cv2.isContourConvex(approx):
+                    quad = approx.reshape(4, 2).astype("float32")
+                    break
+            if quad is None:  # ورقة مكرمشة أو صباع على الطرف: أصغر مستطيل حوالين المنطقة
+                if ca < cv2.contourArea(cv2.convexHull(c)) * 0.85:
+                    continue
+                quad = cv2.boxPoints(cv2.minAreaRect(c)).astype("float32")
+            quad = _order(quad / scale)
+            quad[:, 0] = quad[:, 0].clip(0, w - 1)
+            quad[:, 1] = quad[:, 1].clip(0, h - 1)
+            return quad
+    return None
+
+
+def _warp(img, quad):
+    import cv2
+    import numpy as np
+
+    tl, tr, br, bl = quad
+    width = int(max(np.linalg.norm(br - bl), np.linalg.norm(tr - tl)))
+    height = int(max(np.linalg.norm(tr - br), np.linalg.norm(tl - bl)))
+    if width < 300 or height < 300:
+        return img
+    M = cv2.getPerspectiveTransform(quad, np.float32([[0, 0], [width, 0], [width, height], [0, height]]))
+    return cv2.warpPerspective(img, M, (width, height))
+
+
+def crop_document(img):
+    """صورة كاميرا: نقص ورقة الفاتورة ونعدل منظورها."""
+    quad = find_document(img)
+    return img if quad is None else _warp(img, quad)
+
+
+def scan_document(image_bytes: bytes, corners=None) -> tuple[bytes, bool] | None:
+    """زي CamScanner: نقص الفاتورة من الصورة ونعدل ميلها ونفتّح الخلفية.
+
+    corners: أركان اختارها المستخدم بإيده (4 نقط من 0 لـ 1 بالترتيب tl, tr, br, bl).
+    بيرجع (JPEG، هل اتقصت) أو None.
+    """
+    import cv2
+    import numpy as np
+
+    gray = _decode_gray(image_bytes)
+    if gray is None:
+        return None
+    color = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
+    if color is None or color.shape[:2] != gray.shape[:2]:
+        color = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+    h, w = gray.shape[:2]
+    if corners and len(corners) == 4:
+        quad = _order(np.float32([[x * (w - 1), y * (h - 1)] for x, y in corners]))
+    else:
+        quad = find_document(gray)
+    if quad is not None:
+        color = _warp(color, quad)
+    cropped = quad is not None and color.shape[:2] != (h, w)
+    h, w = color.shape[:2]
+    if max(h, w) > 3000:
+        s = 3000 / max(h, w)
+        color = cv2.resize(color, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
+    # توحيد الإضاءة: نقسم على الخلفية عشان الورقة تبقى بيضا والكلام غامق
+    k = max(31, (min(color.shape[:2]) // 20) | 1)
+    bg = cv2.medianBlur(cv2.dilate(color, np.ones((7, 7), np.uint8)), k)
+    out = cv2.divide(color, bg, scale=255)
+    out = cv2.convertScaleAbs(out, alpha=1.15, beta=-20)
+    ok, buf = cv2.imencode(".jpg", out, [cv2.IMWRITE_JPEG_QUALITY, 88])
+    return (buf.tobytes(), cropped) if ok else None
 
 
 def _resize_for_ocr(img):

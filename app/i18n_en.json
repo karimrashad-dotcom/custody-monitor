@@ -507,5 +507,6 @@
  "مثال: {0} أو أحمد": "e.g. {0} or Ahmed",
  "مثال: زيت، إطار، ورق A{0}": "e.g. oil, tire, A{0} paper",
  "هذه الفاتورة تتجاوز الحد، وسيُرسل تنبيه إلى المدير": "This invoice is over the limit; the admin will be alerted",
- "فتح الملف الأصلي (PDF)": "Open original file (PDF)"
+ "فتح الملف الأصلي (PDF)": "Open original file (PDF)",
+ "الصورة الأصلية قبل القص": "Original photo (before crop)"
 }

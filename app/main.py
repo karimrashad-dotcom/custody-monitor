@@ -296,7 +296,8 @@ def save_file(data: bytes, prefix: str, suffix: str) -> str:
 
 
 @app.post("/upload")
-async def upload(request: Request, custody_id: int = Form(...), image: UploadFile = File(...)):
+async def upload(request: Request, custody_id: int = Form(...), image: UploadFile = File(...),
+                 corners: str = Form("")):
     raw = await image.read()
     if not raw:
         raise Redirect("/upload")
@@ -308,6 +309,7 @@ async def upload(request: Request, custody_id: int = Form(...), image: UploadFil
             raise HTTPException(404)
         pdf_text = ""
         image_bytes = raw
+        photo_raw = None
         log.info("رفع فاتورة: %s نوع=%s حجم=%d", image.filename, image.content_type, len(raw))
         if pdftext.is_pdf(raw):
             try:
@@ -332,6 +334,29 @@ async def upload(request: Request, custody_id: int = Form(...), image: UploadFil
         if not original and raw[:3] != b"\xff\xd8\xff" and raw[:4] != b"\x89PNG":
             # صيغ زي HEIC/WebP: نحولها JPEG بحجم كبير عشان قراءة QR والنص
             image_bytes = prepare_image(raw, max_side=4000)[0]
+        if not original:
+            # صورة كاميرا: زي CamScanner، نقص الفاتورة ونعدل ميلها ونوضحها، ودي اللي بتتعرض.
+            # الصورة الأصلية بتتحفظ كمان وتتفتح من رابط «الصورة الأصلية».
+            pts = None
+            try:
+                pts = [tuple(float(v) for v in p.split(",")) for p in corners.split(";")] if corners else None
+                if pts and (len(pts) != 4 or any(len(p) != 2 or not 0 <= p[0] <= 1 or not 0 <= p[1] <= 1 for p in pts)):
+                    pts = None
+            except ValueError:
+                pts = None
+            try:
+                from . import ocr as ocrm
+                scanned = ocrm.scan_document(image_bytes, pts)
+            except Exception:
+                log.exception("فشل قص وتوضيح الصورة")
+                scanned = None
+            if scanned:
+                scan_bytes, cropped = scanned
+                log.info("قص الصورة: %s", "يدوي" if pts else ("تلقائي" if cropped else "مفيش حدود واضحة"))
+                prepared, media_type = prepare_image(scan_bytes, max_side=2400)
+                original = save_file(prepare_image(image_bytes, max_side=3000)[0], "inv-photo", ".jpg")
+                if cropped:  # القراءة على الفاتورة المقصوصة، وQR على الصورة الأصلية كمان
+                    photo_raw, image_bytes = image_bytes, scan_bytes
         cats = [c["name"] for c in categories(db)]
         api_key = get_setting(db, "anthropic_api_key")
         model = get_setting(db, "anthropic_model", DEFAULT_MODEL)
@@ -347,7 +372,8 @@ async def upload(request: Request, custody_id: int = Form(...), image: UploadFil
     try:
         ext = extract_invoice(prepared, media_type, api_key=api_key, model=model,
                               categories=cats, original_bytes=image_bytes, pdf_text=pdf_text,
-                              own_company=own, photo=not pdftext.is_pdf(raw))
+                              own_company=own, photo=not pdftext.is_pdf(raw) and photo_raw is None,
+                              extra_qr=photo_raw)
     except Exception:
         log.exception("فشلت قراءة الفاتورة")
         from .extract import Extraction
@@ -535,8 +561,10 @@ def invoice_original(request: Request, invoice_id: int):
         path = (dbm.UPLOAD_DIR / inv["original_path"]).resolve()
     if not path.is_relative_to(dbm.UPLOAD_DIR.resolve()) or not path.exists():
         raise HTTPException(404)
-    return FileResponse(path, media_type="application/pdf",
-                        content_disposition_type="inline", filename=f"invoice-{invoice_id}.pdf")
+    pdf = path.suffix.lower() == ".pdf"
+    return FileResponse(path, media_type="application/pdf" if pdf else "image/jpeg",
+                        content_disposition_type="inline",
+                        filename=f"invoice-{invoice_id}{'.pdf' if pdf else '.jpg'}")
 
 
 # ======================= الأسابيع =======================
