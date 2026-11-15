@@ -1164,17 +1164,30 @@ def admin_custody_update(request: Request, custody_id: int, action: str = Form("
     with get_db() as db:
         require_admin(request, db)
         if action == "delete":
-            used = db.execute("SELECT COUNT(*) FROM invoices WHERE custody_id=?", (custody_id,)).fetchone()[0]
-            if used:
-                flash(request, f"مينفعش تتحذف لأن عليها {used} فاتورة. وقّفها بدل الحذف.", "error")
-                return go("/admin/custodies")
+            # حذف نهائي للعهدة وكل اللي عليها (المدير بيأكد قبلها في المتصفح)
+            inv_ids = [r[0] for r in db.execute("SELECT id FROM invoices WHERE custody_id=?", (custody_id,))]
+            files = [r[0] for r in db.execute(
+                "SELECT image_path FROM invoices WHERE custody_id=? AND image_path!=''", (custody_id,))]
             week_ids = [r[0] for r in db.execute("SELECT id FROM weeks WHERE custody_id=?", (custody_id,))]
+            for w in db.execute("SELECT statement_image, statement_file FROM weeks WHERE custody_id=?", (custody_id,)):
+                files += [f for f in (w[0], w[1]) if f]
+            for iid in inv_ids:
+                db.execute("UPDATE statement_lines SET invoice_id=NULL WHERE invoice_id=?", (iid,))
+                db.execute("DELETE FROM alerts WHERE invoice_id=?", (iid,))
+                db.execute("DELETE FROM invoice_items WHERE invoice_id=?", (iid,))
+            db.execute("DELETE FROM invoices WHERE custody_id=?", (custody_id,))
             for wid in week_ids:
                 db.execute("DELETE FROM statement_lines WHERE week_id=?", (wid,))
                 db.execute("DELETE FROM alerts WHERE week_id=?", (wid,))
             db.execute("DELETE FROM weeks WHERE custody_id=?", (custody_id,))
             db.execute("DELETE FROM custodies WHERE id=?", (custody_id,))
-            flash(request, "اتحذفت العهدة")
+            db.commit()
+            for f in files:
+                try:
+                    (dbm.UPLOAD_DIR / f).unlink(missing_ok=True)
+                except OSError:
+                    pass
+            flash(request, f"اتحذفت العهدة ومعاها {len(inv_ids)} فاتورة")
             return go("/admin/custodies")
         if action == "toggle":
             db.execute("UPDATE custodies SET active=1-active WHERE id=?", (custody_id,))

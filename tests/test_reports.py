@@ -51,3 +51,11 @@ def test_delete_empty_custody(admin):
     assert "اتحذفت العهدة" in r.text
     with dbm.get_db() as db:
         assert not db.execute("SELECT 1 FROM custodies WHERE id=?", (cid,)).fetchone()
+
+
+def test_delete_custody_with_invoices(admin, emp):
+    from app import db as dbm
+    with dbm.get_db() as db:
+        cid = db.execute("SELECT id FROM custodies WHERE name LIKE 'عهدة أحمد%'").fetchone()[0]
+    r = admin.get("/admin/custodies")
+    assert r.text.count('value="delete"') >= 1 and "confirm(" in r.text

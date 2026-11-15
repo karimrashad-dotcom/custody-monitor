@@ -71,6 +71,7 @@
 "اتبعتت. الفاتورة أكبر من الحد المسموح، فاتبعت تنبيه للمدير.": "Submitted. The invoice is over the limit, so the admin was alerted.",
 "اتبعتت، بس شكلها مكررة مع فاتورة قبل كده، فاتبعت تنبيه للمدير.": "Submitted, but it looks like a duplicate, so the admin was alerted.",
 "اتحذفت العهدة": "Custody deleted",
+"اتحذفت العهدة ومعاها {0} فاتورة": "Custody deleted with {0} invoices",
 "اتحفظ الاسم": "Name saved",
 "اتحفظ البيان": "Statement saved",
 "اتحفظ المورد": "Vendor saved",
