@@ -138,12 +138,23 @@ def _name_words(name: str) -> set[str]:
     return {w for w in words if w not in GENERIC_NAME_WORDS}
 
 
-def _is_own_line(line: str, own_words: set[str]) -> bool:
-    """السطر ده فيه اسم شركتنا (العميل في الفاتورة) مش اسم المورد."""
+VENDOR_KEYWORDS = ["شركة", "شركه", "مؤسسة", "مؤسسه", "مطبعة", "مطبعه", "مصنع", "مكتب", "محل",
+                   "معرض", "مركز", "ورشة", "ورشه", "صيدلية", "مطعم", "company", "co.", "est.",
+                   "establishment", "trading", "llc", "ltd", "limited", "factory", "agency"]
+
+
+def _vendor_keyword(line: str) -> bool:
+    words = re.findall(r"[^\W\d_]+\.?", line.casefold())
+    return any(w in VENDOR_KEYWORDS or w.rstrip(".") in VENDOR_KEYWORDS for w in words)
+
+
+def _is_own_line(line: str, own_words: set[str], loose: bool = False) -> bool:
+    """السطر ده فيه اسم شركتنا (العميل في الفاتورة) مش اسم المورد.
+    loose: كلمة واحدة مميزة من اسمنا كفاية (للسطور اللي فيها شركة/Company)."""
     if not own_words:
         return False
     found = own_words & _name_words(line)
-    return len(found) >= min(2, len(own_words))
+    return len(found) >= (1 if loose else min(2, len(own_words)))
 
 
 def parse_text(text: str, own: dict | None = None) -> dict:
@@ -225,9 +236,17 @@ def parse_text(text: str, own: dict | None = None) -> dict:
 
     # اسم المورد: أول سطر فيه حروف كفاية ومش عنوان عام
     skip = ["فاتورة", "invoice", "tax", "ضريبية", "simplified", "مبسطة", "receipt", "إيصال"]
-    for ln in name_lines[:6]:
+    def ok(ln: str) -> bool:
         letters = sum(ch.isalpha() for ch in ln)
-        if letters >= 4 and not _has(ln, skip) and letters / max(len(ln), 1) > 0.5:
+        return letters >= 4 and not _has(ln, skip) and letters / max(len(ln), 1) > 0.5
+
+    # الأول: سطر فيه كلمة زي (شركة، مؤسسة، Company) ومش اسم شركتنا. المورد بيبقى فوق والعميل تحت
+    for ln in name_lines[:15]:
+        if ok(ln) and _vendor_keyword(ln) and not _is_own_line(ln, own_words, loose=True):
+            result["vendor_name"] = ln.strip(" /|-_:.,")[:80]
+            return result
+    for ln in name_lines[:6]:
+        if ok(ln):
             result["vendor_name"] = ln.strip(" /|-_:.,")[:80]
             break
     return result
