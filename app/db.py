@@ -113,7 +113,19 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT
 );
+CREATE TABLE IF NOT EXISTS statement_lines (
+    id INTEGER PRIMARY KEY,
+    week_id INTEGER NOT NULL REFERENCES weeks(id) ON DELETE CASCADE,
+    line_no INTEGER NOT NULL,
+    line_date TEXT DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    amount REAL,
+    invoice_id INTEGER REFERENCES invoices(id) ON DELETE SET NULL,
+    match_status TEXT NOT NULL DEFAULT 'none'
+        CHECK (match_status IN ('none','auto','manual','ambiguous'))
+);
 CREATE INDEX IF NOT EXISTS ix_invoices_week ON invoices(week_id);
+CREATE INDEX IF NOT EXISTS ix_statement_week ON statement_lines(week_id);
 CREATE INDEX IF NOT EXISTS ix_invoices_vendor ON invoices(vendor_id);
 CREATE INDEX IF NOT EXISTS ix_invoices_number ON invoices(invoice_number);
 """
@@ -141,6 +153,9 @@ def init_db() -> None:
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     with get_db() as db:
         db.executescript(SCHEMA)
+        week_cols = {r["name"] for r in db.execute("PRAGMA table_info(weeks)")}
+        if "statement_file" not in week_cols:
+            db.execute("ALTER TABLE weeks ADD COLUMN statement_file TEXT")
         if db.execute("SELECT COUNT(*) FROM categories").fetchone()[0] == 0:
             db.executemany(
                 "INSERT INTO categories(name) VALUES (?)",

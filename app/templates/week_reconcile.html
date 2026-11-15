@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row"><h1>مطابقة البيان: {{ week.custody_name }}</h1><span class="spacer"></span><a class="btn sm" href="/weeks/{{ week.id }}">رجوع للأسبوع</a></div>
+<p class="muted small">كل سطر في البيان بيتربط بفاتورة ليها نفس المبلغ (قبل الضريبة أو الإجمالي). لو الربط غلط أو ناقص اختار الفاتورة الصح من القايمة. تقدر تعدّل السطور أو تضيف سطور بإيدك.</p>
+<div class="grid">
+  <div class="card stat"><div class="label">سطور البيان</div><div class="value num">{{ rec.lines|length }}</div><div class="sub">إجمالي {{ rec.statement_total|money }}</div></div>
+  <div class="card stat"><div class="label">مربوطة</div><div class="value num">{{ rec.matched_count }}</div></div>
+  <div class="card stat"><div class="label">سطور من غير فاتورة</div><div class="value num" {% if rec.unmatched_lines %}style="color:var(--danger)"{% endif %}>{{ rec.unmatched_lines|length }}</div></div>
+  <div class="card stat"><div class="label">فواتير من غير سطر</div><div class="value num" {% if rec.unmatched_invoices %}style="color:var(--danger)"{% endif %}>{{ rec.unmatched_invoices|length }}</div></div>
+</div>
+{% if week.statement_image %}<details class="card"><summary>صورة البيان</summary><img class="invoice-img" style="margin-top:8px" src="/weeks/{{ week.id }}/statement" alt="بيان العهدة"></details>{% endif %}
+
+<form class="card" method="post" action="/weeks/{{ week.id }}/reconcile">
+  <div class="table-wrap"><table class="items-table" id="lines">
+    <thead><tr><th>#</th><th>البيان (الوصف)</th><th>المبلغ</th><th class="hide-sm">التاريخ</th><th>الفاتورة المربوطة</th></tr></thead>
+    <tbody>
+    {% for ln in rec.lines %}
+      <tr>
+        <td class="num">{{ ln.line_no }}<input type="hidden" name="line_id" value="{{ ln.id }}"></td>
+        <td><input name="line_description" value="{{ ln.description }}" {% if week.status != 'open' %}disabled{% endif %}></td>
+        <td><input name="line_amount" value="{{ ln.amount if ln.amount is not none else '' }}" inputmode="decimal" dir="ltr" style="max-width:110px" {% if week.status != 'open' %}disabled{% endif %}></td>
+        <td class="hide-sm"><input name="line_date" type="date" value="{{ ln.line_date }}" {% if week.status != 'open' %}disabled{% endif %}></td>
+        <td>
+          <select name="line_invoice" {% if week.status != 'open' %}disabled{% endif %} style="min-width:200px">
+            <option value="">— مش مربوط —</option>
+            {% for i in rec.invoices %}<option value="{{ i.id }}" {% if i.id == ln.invoice_id %}selected{% endif %}>#{{ i.id }} {{ i.vendor_name or 'بدون مورد' }} · {{ i.total|money }}{% if i.subtotal %} ({{ i.subtotal|money }} قبل الضريبة){% endif %}</option>{% endfor %}
+          </select>
+          <div class="small" style="margin-top:2px">
+          {% if ln.match_status == 'auto' %}<span class="pill approved">اتربط بالمبلغ</span>
+          {% elif ln.match_status == 'manual' %}<span class="pill open">ربط يدوي</span>
+          {% elif ln.match_status == 'ambiguous' %}<span class="pill pending">أكتر من فاتورة بنفس المبلغ، اختار</span>
+          {% else %}<span class="pill rejected">مفيش فاتورة بالمبلغ ده</span>{% endif %}
+          </div>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody></table></div>
+  {% if week.status == 'open' %}
+  <div class="row" style="margin-top:10px">
+    <button type="button" class="btn sm" id="addline">+ سطر</button>
+    <span class="spacer"></span>
+    <button class="btn primary">حفظ وربط</button>
+  </div>
+  {% endif %}
+</form>
+
+{% if rec.unmatched_invoices %}
+<h2>فواتير مالهاش سطر في البيان</h2>
+<div class="card table-wrap"><table>
+  <tr><th>#</th><th>المورد</th><th>رقم الفاتورة</th><th>قبل الضريبة</th><th>الإجمالي</th></tr>
+  {% for i in rec.unmatched_invoices %}<tr><td><a href="/invoices/{{ i.id }}">{{ i.id }}</a></td><td>{{ i.vendor_name or '-' }}</td><td>{{ i.invoice_number or '-' }}</td><td class="num">{{ i.subtotal|money }}</td><td class="num">{{ i.total|money }}</td></tr>{% endfor %}
+</table></div>
+{% endif %}
+<script>
+document.getElementById('addline')?.addEventListener('click', () => {
+  const tb = document.querySelector('#lines tbody');
+  const sel = document.querySelector('#lines select');
+  const opts = sel ? sel.innerHTML.replace(/ selected/g, '') : '<option value="">— مش مربوط —</option>{% for i in rec.invoices %}<option value="{{ i.id }}">#{{ i.id }} {{ i.vendor_name or "بدون مورد" }} · {{ i.total|money }}</option>{% endfor %}';
+  const tr = document.createElement('tr');
+  tr.innerHTML = '<td><input type="hidden" name="line_id" value=""></td><td><input name="line_description"></td><td><input name="line_amount" inputmode="decimal" dir="ltr" style="max-width:110px"></td><td class="hide-sm"><input name="line_date" type="date"></td><td><select name="line_invoice" style="min-width:200px">' + opts + '</select></td>';
+  tb.appendChild(tr);
+});
+</script>
+{% endblock %}

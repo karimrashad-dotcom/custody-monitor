@@ -7,7 +7,13 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from app import extract, ocr
 
-FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+from pathlib import Path
+
+from PIL import features
+
+FONT = next((str(p) for p in [Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+                                Path(r"C:\Windows\Fonts\arial.ttf")] if p.exists()), None)
+CAN_DRAW_ARABIC = bool(FONT) and features.check("raqm")
 
 
 def make_invoice(lines, rotate=1.5, blur=0.8) -> bytes:
@@ -43,7 +49,8 @@ def test_parse_text_rules():
     assert r["total"] == 460.0 and r["vat_amount"] == 60.0 and r["subtotal"] == 400.0
 
 
-@pytest.mark.skipif(not ocr.find_tesseract(), reason="Tesseract مش متثبت")
+@pytest.mark.skipif(not ocr.find_tesseract() or not CAN_DRAW_ARABIC,
+                    reason="Tesseract أو رسم العربي (libraqm) مش متاح")
 def test_ocr_on_photo():
     img = make_invoice([
         "مؤسسة الريان للتجارة",

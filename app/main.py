@@ -16,6 +16,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import db as dbm
+from . import statement
 from .alerts import KIND_LABELS, create_alert, run_invoice_checks
 from .db import get_db, get_setting, set_setting
 from .extract import DEFAULT_MODEL, extract_invoice, prepare_image
@@ -248,6 +249,15 @@ def save_image(data: bytes, prefix: str) -> str:
     return rel.as_posix()
 
 
+def save_file(data: bytes, prefix: str, suffix: str) -> str:
+    today = date.today()
+    rel = Path(f"{today:%Y}") / f"{today:%m}" / f"{prefix}-{uuid.uuid4().hex[:12]}{suffix}"
+    path = dbm.UPLOAD_DIR / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return rel.as_posix()
+
+
 @app.post("/upload")
 async def upload(request: Request, custody_id: int = Form(...), image: UploadFile = File(...)):
     raw = await image.read()
@@ -398,6 +408,7 @@ async def invoice_edit(request: Request, invoice_id: int):
             db.execute("UPDATE invoices SET status='pending', submitted_at=? WHERE id=?",
                        (datetime.now().isoformat(timespec="seconds"), invoice_id))
             raised = run_invoice_checks(db, invoice_id)
+            statement.match_week(db, week_id)
             if "over_limit" in raised:
                 flash(request, "اتبعتت. الفاتورة أكبر من الحد المسموح، فاتبعت تنبيه للمدير.", "warn")
             elif "duplicate" in raised:
@@ -476,29 +487,63 @@ def week_detail(request: Request, week_id: int):
         ).fetchall()
         return render(request, db, "week_detail.html", user=user, week=week,
                       totals=dbm.week_totals(db, week_id), invoices=week_invoices(db, week_id),
-                      by_cat=by_cat)
+                      by_cat=by_cat, rec=statement.reconciliation(db, week_id))
 
 
 @app.post("/weeks/{week_id}/statement")
 async def week_statement(request: Request, week_id: int, image: UploadFile = File(...)):
+    """بيان العهدة: ملف Excel/CSV (أدق) أو صورة. السطور بتتقري وتتربط بالفواتير بالمبلغ."""
     raw = await image.read()
+    name = (image.filename or "").lower()
     with get_db() as db:
         user = require_user(request, db)
         week = load_week(db, week_id, user)
         if week["status"] == "closed":
             raise HTTPException(400, "الأسبوع مقفول")
-        try:
-            prepared, _ = prepare_image(raw, max_side=2400)
-        except Exception:
-            flash(request, "الملف ده مش صورة", "error")
+        if not raw:
             return go(f"/weeks/{week_id}")
-        rel = save_image(prepared, "stmt")
-        db.execute("UPDATE weeks SET statement_image=? WHERE id=?", (rel, week_id))
+        lines: list[dict] = []
+        if name.endswith((".xlsx", ".xlsm")) or raw[:2] == b"PK":
+            try:
+                lines = statement.parse_excel(raw)
+            except Exception:
+                flash(request, "مقدرتش أفتح ملف الـ Excel ده. احفظه بصيغة xlsx وجرب تاني.", "error")
+                return go(f"/weeks/{week_id}")
+            rel = save_file(raw, "stmt", ".xlsx")
+            db.execute("UPDATE weeks SET statement_file=? WHERE id=?", (rel, week_id))
+        elif name.endswith(".csv"):
+            lines = statement.parse_csv(raw)
+            rel = save_file(raw, "stmt", ".csv")
+            db.execute("UPDATE weeks SET statement_file=? WHERE id=?", (rel, week_id))
+        else:
+            try:
+                prepared, _ = prepare_image(raw, max_side=2400)
+            except Exception:
+                flash(request, "الملف ده مش صورة ولا Excel", "error")
+                return go(f"/weeks/{week_id}")
+            rel = save_image(prepared, "stmt")
+            db.execute("UPDATE weeks SET statement_image=? WHERE id=?", (rel, week_id))
+            db.commit()
+            from .ocr import read_text
+            text = read_text(raw) or read_text(prepared)
+            lines = statement.parse_ocr_text(text) if text else []
+
+        db.execute("DELETE FROM statement_lines WHERE week_id=?", (week_id,))
+        for n, ln in enumerate(lines, start=1):
+            db.execute(
+                "INSERT INTO statement_lines(week_id,line_no,line_date,description,amount) VALUES (?,?,?,?,?)",
+                (week_id, n, ln.get("line_date", ""), ln["description"], ln["amount"]),
+            )
+        result = statement.match_week(db, week_id)
         create_alert(db, "statement",
-                     f"{week['full_name']} رفع كشف عهدة {week['custody_name']} لأسبوع {week['start_date']}.",
+                     f"{week['full_name']} رفع بيان عهدة {week['custody_name']} لأسبوع {week['start_date']} "
+                     f"({len(lines)} سطر، اتربط منهم {result['matched']}).",
                      week_id=week_id)
-        flash(request, "اترفع كشف العهدة")
-        return go(f"/weeks/{week_id}")
+        if lines:
+            flash(request, f"اتقرا {len(lines)} سطر من البيان، واتربط {result['matched']} منهم بفواتير. راجع المطابقة.")
+        else:
+            flash(request, "اترفع البيان بس مقدرتش أقرا سطوره. اكتب السطور في صفحة المطابقة.", "warn")
+        return go(f"/weeks/{week_id}/reconcile")
 
 
 @app.get("/weeks/{week_id}/statement")
@@ -506,9 +551,57 @@ def week_statement_image(request: Request, week_id: int):
     with get_db() as db:
         user = require_user(request, db)
         week = load_week(db, week_id, user)
-    if not week["statement_image"]:
+    rel = week["statement_image"] if request.query_params.get("file") != "1" else week["statement_file"]
+    if not rel:
         raise HTTPException(404)
-    return FileResponse(dbm.UPLOAD_DIR / week["statement_image"])
+    path = dbm.UPLOAD_DIR / rel
+    return FileResponse(path, filename=path.name if path.suffix != ".jpg" else None)
+
+
+@app.get("/weeks/{week_id}/reconcile")
+def week_reconcile(request: Request, week_id: int):
+    with get_db() as db:
+        user = require_user(request, db)
+        week = load_week(db, week_id, user)
+        rec = statement.reconciliation(db, week_id)
+        return render(request, db, "week_reconcile.html", user=user, week=week, rec=rec,
+                      totals=dbm.week_totals(db, week_id))
+
+
+@app.post("/weeks/{week_id}/reconcile")
+async def week_reconcile_save(request: Request, week_id: int):
+    form = await request.form()
+    with get_db() as db:
+        user = require_user(request, db)
+        week = load_week(db, week_id, user)
+        if week["status"] == "closed":
+            raise HTTPException(400, "الأسبوع مقفول")
+        valid = {r["id"] for r in db.execute(
+            "SELECT id FROM invoices WHERE week_id=? AND status IN ('pending','approved')", (week_id,))}
+        old = {r["id"]: r for r in db.execute("SELECT * FROM statement_lines WHERE week_id=?", (week_id,))}
+        db.execute("DELETE FROM statement_lines WHERE week_id=?", (week_id,))
+        descs, amounts = form.getlist("line_description"), form.getlist("line_amount")
+        dates, links, ids = form.getlist("line_date"), form.getlist("line_invoice"), form.getlist("line_id")
+        used: set[int] = set()
+        n = 0
+        for i, desc in enumerate(descs):
+            amount = to_float(amounts[i] if i < len(amounts) else None)
+            if not desc.strip() and not amount:
+                continue
+            n += 1
+            cur = db.execute(
+                "INSERT INTO statement_lines(week_id,line_no,line_date,description,amount) VALUES (?,?,?,?,?)",
+                (week_id, n, (dates[i] if i < len(dates) else "").strip(), desc.strip(), amount),
+            )
+            choice = links[i] if i < len(links) else ""
+            prev = old.get(int(ids[i])) if i < len(ids) and ids[i].isdigit() else None
+            if choice.isdigit() and int(choice) in valid and int(choice) not in used:
+                how = "auto" if prev and prev["invoice_id"] == int(choice) and prev["match_status"] == "auto" else "manual"
+                statement.link(db, cur.lastrowid, int(choice), how)
+                used.add(int(choice))
+        result = statement.match_week(db, week_id)
+        flash(request, "اتحفظ البيان" + (f"، واتربط {result['matched']} سطر تلقائي" if result["matched"] else ""))
+        return go(f"/weeks/{week_id}/reconcile")
 
 
 @app.post("/admin/weeks/{week_id}/close")
@@ -556,13 +649,13 @@ def xlsx_response(wb, filename: str) -> StreamingResponse:
     )
 
 
-INVOICE_HEADERS = ["#", "التاريخ", "رقم الفاتورة", "المورد", "الرقم الضريبي", "التصنيف",
+INVOICE_HEADERS = ["#", "التاريخ", "رقم الفاتورة", "المورد", "الرقم الضريبي", "التصنيف", "البيان",
                    "قبل الضريبة", "الضريبة", "الإجمالي", "الحالة", "فوق الحد"]
 
 
 def invoice_row(i):
     return [i["id"], i["invoice_date"], i["invoice_number"], i["vendor_name"], i["vat_number"],
-            i["category_name"], i["subtotal"], i["vat_amount"], i["total"],
+            i["category_name"], i["description"], i["subtotal"], i["vat_amount"], i["total"],
             STATUS_LABELS[i["status"]], "نعم" if i["over_limit"] else ""]
 
 
@@ -603,7 +696,40 @@ def week_export(request: Request, week_id: int):
         c.font = Font(bold=True)
     for i in invoices:
         ws2.append(invoice_row(i))
+    ws3 = new_sheet(wb, "البيان والمطابقة")
+    ws3.append(["#", "التاريخ", "البيان", "المبلغ", "الفاتورة", "المورد", "إجمالي الفاتورة", "الربط"])
+    for c in ws3[1]:
+        c.font = Font(bold=True)
+    labels = {"auto": "بالمبلغ", "manual": "يدوي", "ambiguous": "محتاج اختيار", "none": "مفيش فاتورة"}
+    with get_db() as db:
+        rec = statement.reconciliation(db, week_id)
+    for ln in rec["lines"]:
+        ws3.append([ln["line_no"], ln["line_date"], ln["description"], ln["amount"], ln["invoice_id"],
+                    ln["vendor_name"], ln["inv_total"], labels.get(ln["match_status"], "")])
+    for i in rec["unmatched_invoices"]:
+        ws3.append(["", i["invoice_date"], "فاتورة مش في البيان", None, i["id"], i["vendor_name"], i["total"], "مفيش سطر"])
     return xlsx_response(wb, f"week-{week_id}-{week['start_date']}.xlsx")
+
+
+@app.get("/statement-template.xlsx")
+def statement_template(request: Request):
+    """قالب بيان العهدة الفاضي اللي الموظف بيملاه ويرفعه."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+    with get_db() as db:
+        user = require_user(request, db)
+    wb = Workbook()
+    ws = new_sheet(wb, "بيان العهدة")
+    ws.append(["بيان عهدة", user["full_name"]])
+    ws.append([])
+    ws.append(["التاريخ", "البيان", "المبلغ", "ملاحظات"])
+    for c in ws[3]:
+        c.font = Font(bold=True)
+        c.fill = PatternFill("solid", fgColor="E3F2EF")
+    ws.append([date.today().isoformat(), "مثال: تغيير زيت سيارة النقل (امسح السطر ده)", 500, ""])
+    for col, width in zip("ABCD", (14, 45, 12, 25)):
+        ws.column_dimensions[col].width = width
+    return xlsx_response(wb, "bayan-template.xlsx")
 
 
 @app.get("/admin/export/invoices.xlsx")
