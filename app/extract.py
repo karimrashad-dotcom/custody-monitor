@@ -97,7 +97,49 @@ def decode_qr(image_bytes: bytes) -> str | None:
             continue
         if text:
             return text
-    return _decode_qr_zxing(gray) or _decode_qr_tiles(detector, gray)
+    return _decode_qr_zxing(gray) or _decode_qr_located(detector, gray) or _decode_qr_tiles(detector, gray)
+
+
+def _decode_qr_located(detector, gray) -> str | None:
+    """الكاشف ساعات بيلاقي مكان الكود من غير ما يقدر يفكه: نقصه ونكبّره ونوضحه ونجرب تاني."""
+    import cv2
+    import numpy as np
+
+    h, w = gray.shape[:2]
+    scale = min(1.0, 1600 / max(h, w))
+    small = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA) if scale < 1 else gray
+    quads = []
+    try:
+        ok, pts = detector.detectMulti(small)
+        if ok and pts is not None:
+            quads += list(pts)
+    except cv2.error:
+        pass
+    try:
+        ok, pts = detector.detect(small)
+        if ok and pts is not None:
+            quads.append(pts.reshape(4, 2))
+    except cv2.error:
+        pass
+    for q in quads:
+        q = np.asarray(q, dtype=np.float32).reshape(4, 2) / scale
+        x0, y0 = q.min(0); x1, y1 = q.max(0)
+        m = max(x1 - x0, y1 - y0) * 0.25
+        x0, y0 = int(max(0, x0 - m)), int(max(0, y0 - m))
+        x1, y1 = int(min(w, x1 + m)), int(min(h, y1 + m))
+        crop = gray[y0:y1, x0:x1]
+        if crop.size == 0:
+            continue
+        for f in (1, 2, 3):
+            img = cv2.resize(crop, None, fx=f, fy=f, interpolation=cv2.INTER_CUBIC) if f > 1 else crop
+            for v in (img, cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]):
+                try:
+                    text, _, _ = detector.detectAndDecode(v)
+                except cv2.error:
+                    continue
+                if text:
+                    return text
+    return None
 
 
 def _decode_qr_zxing(gray) -> str | None:
@@ -115,7 +157,7 @@ def _decode_qr_zxing(gray) -> str | None:
     return None
 
 
-def _decode_qr_tiles(detector, gray, budget: float = 4.0) -> str | None:
+def _decode_qr_tiles(detector, gray, budget: float = 6.0) -> str | None:
     """صورة كاميرا: الكود صغير جوه الصورة، فبندور عليه في مربعات صغيرة مكبّرة."""
     import time
 
@@ -135,7 +177,8 @@ def _decode_qr_tiles(detector, gray, budget: float = 4.0) -> str | None:
                 if time.monotonic() - start > budget:
                     return None
                 tile = gray[y:y + t, x:x + t]
-                for img in (tile, cv2.resize(tile, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)):
+                big = cv2.resize(tile, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+                for img in (tile, big, cv2.threshold(big, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]):
                     try:
                         text, _, _ = detector.detectAndDecode(img)
                     except cv2.error:
