@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="row"><h1>مراجعة الفاتورة #{{ inv.id }}</h1><span class="spacer"></span>
-  <span class="small muted">طريقة القراءة: {{ SOURCE_LABELS.get(inv.extraction_source, inv.extraction_source) }}</span></div>
+<div class="row"><h1>مراجعة الفاتورة #{{ inv.id }}</h1><span class="spacer"></span></div>
 <div class="split">
   <div class="card"><a href="/invoices/{{ inv.id }}/image" target="_blank"><img class="invoice-img" src="/invoices/{{ inv.id }}/image" alt="صورة الفاتورة"></a>{% if inv.original_path %}<div class="small" style="margin-top:8px"><a href="/invoices/{{ inv.id }}/original" target="_blank">📄 فتح الملف الأصلي (PDF)</a></div>{% endif %}</div>
   <form class="card" method="post" action="/invoices/{{ inv.id }}/edit">

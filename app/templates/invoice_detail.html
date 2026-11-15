@@ -20,7 +20,6 @@
       <tr><th>الضريبة</th><td class="num">{{ inv.vat_amount|money }}</td></tr>
       <tr><th>الإجمالي</th><td class="num"><b>{{ inv.total|money }}</b> <span class="muted small">(الحد {{ inv.per_invoice_limit|money }})</span></td></tr>
       {% if inv.description %}<tr><th>ملاحظة</th><td>{{ inv.description }}</td></tr>{% endif %}
-      <tr><th>القراءة</th><td>{{ SOURCE_LABELS.get(inv.extraction_source, inv.extraction_source) }}</td></tr>
       {% if inv.reviewed_at %}<tr><th>المراجعة</th><td>{{ inv.reviewer_name }} · {{ inv.reviewed_at[:16] }}{% if inv.review_notes %}<div>{{ inv.review_notes }}</div>{% endif %}</td></tr>{% endif %}
     </table></div>
     {% if items %}<div class="card"><b>الأصناف</b><div class="table-wrap"><table>
