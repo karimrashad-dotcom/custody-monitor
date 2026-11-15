@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>الإعدادات</h1>
+<form class="card" method="post" action="/admin/settings">
+  <h2 style="margin-top:0">عام</h2>
+  <div class="fields">
+    <div class="field"><label>اسم الشركة</label><input name="company_name" value="{{ v.company_name }}"></div>
+    <div class="field"><label>الأسبوع بيبدأ يوم</label><select name="week_start_weekday">
+      {% for k, d in [('5','السبت'),('6','الأحد'),('0','الاثنين')] %}<option value="{{ k }}" {% if v.week_start_weekday == k %}selected{% endif %}>{{ d }}</option>{% endfor %}</select></div>
+  </div>
+  <h2>القراءة الذكية للفواتير (Claude)</h2>
+  <p class="small muted">من غير مفتاح، البرنامج بيقرا كود QR بتاع الفاتورة الإلكترونية بس، والباقي يدوي. المفتاح بيتعمل من console.anthropic.com.</p>
+  <div class="fields">
+    <div class="field"><label>مفتاح API</label><input name="anthropic_api_key" type="password" value="{{ '********' if v.anthropic_api_key else '' }}" dir="ltr" autocomplete="off"></div>
+    <div class="field"><label>الموديل</label><input name="anthropic_model" value="{{ v.anthropic_model }}" dir="ltr"></div>
+  </div>
+  <h2>تنبيهات الإيميل (اختياري)</h2>
+  <p class="small muted">التنبيهات بتظهر جوه البرنامج دايماً. لو عاوزها توصل إيميل كمان املا البيانات دي (مثلاً من Outlook أو Gmail).</p>
+  <div class="fields">
+    <div class="field"><label>إيميل استلام التنبيهات</label><input name="alert_email" value="{{ v.alert_email }}" dir="ltr"></div>
+    <div class="field"><label>SMTP server</label><input name="smtp_host" value="{{ v.smtp_host }}" dir="ltr" placeholder="smtp.office365.com"></div>
+    <div class="field"><label>Port</label><input name="smtp_port" value="{{ v.smtp_port or '587' }}" dir="ltr"></div>
+    <div class="field"><label>اسم المستخدم</label><input name="smtp_user" value="{{ v.smtp_user }}" dir="ltr"></div>
+    <div class="field"><label>كلمة السر</label><input name="smtp_password" type="password" value="{{ '********' if v.smtp_password else '' }}" dir="ltr" autocomplete="off"></div>
+    <div class="field"><label>المرسل</label><input name="smtp_from" value="{{ v.smtp_from }}" dir="ltr"></div>
+    <div class="field"><label>TLS</label><select name="smtp_tls"><option value="1" {% if v.smtp_tls == '1' %}selected{% endif %}>نعم</option><option value="0" {% if v.smtp_tls == '0' %}selected{% endif %}>لا</option></select></div>
+  </div>
+  <button class="btn primary">حفظ الإعدادات</button>
+</form>
+<div class="card">
+  <h2 style="margin-top:0">التصنيفات</h2>
+  <table>{% for c in categories %}<tr><td>
+    <form class="row" method="post" action="/admin/categories"><input type="hidden" name="rename_id" value="{{ c.id }}">
+      <input name="new_name" value="{{ c.name }}" style="flex:1"><button class="btn sm">حفظ</button></form></td></tr>{% endfor %}</table>
+  <form class="row" method="post" action="/admin/categories" style="margin-top:10px"><input name="name" placeholder="تصنيف جديد" style="flex:1"><button class="btn sm primary">إضافة</button></form>
+</div>
+{% endblock %}

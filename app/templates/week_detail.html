@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% from "_macros.html" import balance, invoice_table %}
+{% block content %}
+<div class="row"><h1>{{ week.custody_name }}: أسبوع {{ week.start_date }}</h1>
+  <span class="pill {{ week.status }}">{{ 'مفتوح' if week.status == 'open' else 'مقفول' }}</span>
+  <span class="spacer"></span><a class="btn sm" href="/weeks/{{ week.id }}/export.xlsx">تصدير Excel</a></div>
+<div class="grid">
+  <div class="card stat"><div class="label">مبلغ العهدة</div><div class="value num">{{ totals.opening|money }}</div></div>
+  <div class="card stat"><div class="label">المصروف</div><div class="value num">{{ totals.spent|money }}</div><div class="sub">منها ضريبة {{ totals.vat|money }}</div></div>
+  <div class="card stat"><div class="label">المتبقي</div><div class="value num" {% if totals.remaining < 0 %}style="color:var(--danger)"{% endif %}>{{ totals.remaining|money }}</div></div>
+  <div class="card stat"><div class="label">الفواتير</div><div class="value num">{{ totals.count }}</div><div class="sub">{{ totals.pending_count }} مستنية مراجعة · مرفوض {{ totals.rejected|money }}</div></div>
+</div>
+<div class="card">{{ balance(totals) }}</div>
+
+<div class="split">
+  <div class="card">
+    <b>كشف العهدة</b>
+    {% if week.statement_image %}
+      <div style="margin-top:8px"><a href="/weeks/{{ week.id }}/statement" target="_blank"><img class="invoice-img" src="/weeks/{{ week.id }}/statement" alt="كشف العهدة"></a></div>
+    {% else %}<p class="muted">لسه مترفعش كشف العهدة للأسبوع ده.</p>{% endif %}
+    {% if week.status == 'open' %}
+    <form method="post" action="/weeks/{{ week.id }}/statement" enctype="multipart/form-data" style="margin-top:10px">
+      <input type="file" name="image" accept="image/*" capture="environment" required>
+      <button class="btn" style="margin-top:8px">{{ 'تغيير الكشف' if week.statement_image else 'رفع صورة الكشف' }}</button>
+    </form>
+    {% endif %}
+  </div>
+  <div class="card">
+    <b>المصروف حسب التصنيف</b>
+    <table style="margin-top:6px">{% for c in by_cat %}<tr><td>{{ c.name }}</td><td class="num">{{ c.n }} فاتورة</td><td class="num">{{ c.total|money }}</td></tr>{% else %}<tr><td class="muted">مفيش مصروف.</td></tr>{% endfor %}</table>
+    {% if user.role == 'admin' %}
+      {% if week.status == 'open' %}
+      <form method="post" action="/admin/weeks/{{ week.id }}/close" style="margin-top:14px" onsubmit="return confirm('إقفال الأسبوع؟ بعد الإقفال الفواتير مش هتتعدل.')">
+        <div class="field"><label>ملاحظات الإقفال</label><input name="notes"></div>
+        <button class="btn primary">إقفال الأسبوع</button>
+      </form>
+      {% else %}
+      <p class="small muted" style="margin-top:14px">اتقفل {{ (week.closed_at or '')[:16] }} بواسطة {{ week.closed_by_name }}{% if week.close_notes %} · {{ week.close_notes }}{% endif %}</p>
+      <form method="post" action="/admin/weeks/{{ week.id }}/reopen"><button class="btn sm">إعادة فتح</button></form>
+      {% endif %}
+    {% endif %}
+  </div>
+</div>
+<h2>فواتير الأسبوع</h2>
+<div class="card">{{ invoice_table(invoices) }}</div>
+{% endblock %}

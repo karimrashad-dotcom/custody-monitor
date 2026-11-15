@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>الموظفين</h1>
+<details class="card" {% if users|length < 2 %}open{% endif %}><summary><b>إضافة موظف</b></summary>
+<form method="post" action="/admin/users" style="margin-top:12px">
+  <div class="fields">
+    <div class="field"><label>الاسم</label><input name="full_name" required></div>
+    <div class="field"><label>اسم الدخول (إنجليزي)</label><input name="username" required dir="ltr" autocapitalize="none"></div>
+    <div class="field"><label>كلمة السر</label><input name="password" required minlength="6"></div>
+    <div class="field"><label>الجوال</label><input name="phone" dir="ltr"></div>
+    <div class="field"><label>الإيميل</label><input name="email" type="email" dir="ltr"></div>
+    <div class="field"><label>الدور</label><select name="role"><option value="employee">موظف صاحب عهدة</option><option value="admin">مدير</option></select></div>
+    <div class="field"><label>مبلغ العهدة الأسبوعي (اختياري)</label><input name="weekly_amount" inputmode="decimal" dir="ltr"></div>
+    <div class="field"><label>حد الفاتورة الواحدة (اختياري)</label><input name="per_invoice_limit" inputmode="decimal" dir="ltr"></div>
+  </div>
+  <p class="small muted">لو كتبت مبلغ العهدة والحد، العهدة هتتعمل للموظف على طول.</p>
+  <button class="btn primary">إضافة</button>
+</form></details>
+<div class="card table-wrap"><table>
+  <thead><tr><th>الاسم</th><th>اسم الدخول</th><th class="hide-sm">الجوال</th><th>الدور</th><th>العهد</th><th>الحالة</th><th></th></tr></thead>
+  <tbody>
+  {% for u in users %}
+  <tr {% if not u.active %}class="muted"{% endif %}>
+    <td>{{ u.full_name }}</td><td dir="ltr" style="text-align:right">{{ u.username }}</td><td class="hide-sm" dir="ltr" style="text-align:right">{{ u.phone }}</td>
+    <td>{{ 'مدير' if u.role == 'admin' else 'موظف' }}</td><td class="num">{{ u.n_custodies }}</td>
+    <td>{{ 'نشط' if u.active else 'موقوف' }}</td>
+    <td><details><summary class="small">تعديل</summary>
+      <form method="post" action="/admin/users/{{ u.id }}" style="margin-top:6px;min-width:220px">
+        <input type="hidden" name="action" value="update">
+        <div class="field"><input name="full_name" value="{{ u.full_name }}"></div>
+        <div class="field"><input name="phone" value="{{ u.phone }}" placeholder="الجوال" dir="ltr"></div>
+        <div class="field"><input name="email" value="{{ u.email }}" placeholder="الإيميل" dir="ltr"></div>
+        <button class="btn sm">حفظ</button></form>
+      <form method="post" action="/admin/users/{{ u.id }}" style="margin-top:6px">
+        <input type="hidden" name="action" value="password">
+        <div class="field"><input name="password" placeholder="كلمة سر جديدة" minlength="6"></div>
+        <button class="btn sm">تغيير كلمة السر</button></form>
+      <form method="post" action="/admin/users/{{ u.id }}" style="margin-top:6px"><input type="hidden" name="action" value="toggle">
+        <button class="btn sm danger">{{ 'إيقاف الحساب' if u.active else 'تفعيل الحساب' }}</button></form>
+    </details></td>
+  </tr>
+  {% endfor %}
+  </tbody></table></div>
+{% endblock %}

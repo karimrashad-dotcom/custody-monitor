@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>حسابي</h1>
+<div class="card" style="max-width:460px">
+  <p><b>{{ user.full_name }}</b> <span class="muted" dir="ltr">({{ user.username }})</span></p>
+  <form method="post" action="/account">
+    <div class="field"><label>كلمة السر الحالية</label><input name="current" type="password" required></div>
+    <div class="field"><label>كلمة السر الجديدة</label><input name="new" type="password" required minlength="6"></div>
+    <button class="btn primary">تغيير كلمة السر</button>
+  </form>
+</div>
+{% endblock %}

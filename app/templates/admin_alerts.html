@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row"><h1>التنبيهات</h1><span class="spacer"></span>
+  <a class="btn sm {% if show == 'unread' %}primary{% endif %}" href="?show=unread">الجديدة</a>
+  <a class="btn sm {% if show == 'all' %}primary{% endif %}" href="?show=all">الكل</a>
+  <form class="inline" method="post" action="/admin/alerts/read"><button class="btn sm">تعليم الكل كمقروء</button></form></div>
+{% for a in alerts %}
+<div class="card alert-item {{ a.kind }} {% if a.is_read %}read{% endif %}">
+  <div class="row small muted"><span>{{ KIND_LABELS.get(a.kind, a.kind) }} · {{ a.created_at[:16] }}</span><span class="spacer"></span>
+    {% if not a.is_read %}<form class="inline" method="post" action="/admin/alerts/read"><input type="hidden" name="alert_id" value="{{ a.id }}"><button class="btn sm">مقروء</button></form>{% endif %}</div>
+  <div>{{ a.message }}</div>
+  {% if a.invoice_id %}<a class="small" href="/invoices/{{ a.invoice_id }}">عرض الفاتورة{% if a.invoice_status %} ({{ STATUS_LABELS[a.invoice_status] }}){% endif %}</a>{% elif a.week_id %}<a class="small" href="/weeks/{{ a.week_id }}">عرض الأسبوع</a>{% endif %}
+</div>
+{% else %}<div class="card muted">مفيش تنبيهات.</div>{% endfor %}
+{% endblock %}

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0f6b5c">
+  <title>{% block title %}مراقبة العهد{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="/">مراقبة العهد{% if company %} · {{ company }}{% endif %}</a>
+    {% if user %}
+    <nav class="links">
+      {% if user.role == 'admin' %}
+        <a href="/admin">الرئيسية</a>
+        <a href="/admin/invoices">الفواتير</a>
+        <a href="/admin/weeks">الأسابيع</a>
+        <a href="/admin/vendors">الموردين</a>
+        <a href="/admin/alerts">التنبيهات {% if unread_alerts %}<span class="badge">{{ unread_alerts }}</span>{% endif %}</a>
+        <a href="/admin/custodies">العهد</a>
+        <a href="/admin/users">الموظفين</a>
+        <a href="/admin/settings">الإعدادات</a>
+      {% else %}
+        <a href="/me">عهدتي</a>
+        <a href="/upload">رفع فاتورة</a>
+      {% endif %}
+      <a href="/account" title="{{ user.full_name }}">حسابي</a>
+      <a href="/logout">خروج</a>
+    </nav>
+    {% endif %}
+  </div>
+</header>
+<main class="wrap">
+  {% for kind, msg in messages %}<div class="flash {{ kind }}">{{ msg }}</div>{% endfor %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

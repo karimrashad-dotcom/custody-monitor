@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>تحليل الموردين</h1>
+<form class="card" method="get"><div class="fields">
+  <div class="field"><label>التصنيف</label><select name="category_id"><option value="">الكل</option>
+    {% for c in categories %}<option value="{{ c.id }}" {% if f.category_id == c.id|string %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></div>
+  <div class="field"><label>بحث عن صنف</label><input name="q" value="{{ f.q }}" placeholder="مثلاً: زيت، كفر، ورق A4"></div>
+</div><button class="btn primary sm">عرض</button></form>
+
+<h2>أرخص مورد لكل صنف</h2>
+<p class="muted small">مقارنة سعر الوحدة للأصناف اللي اتقرت من الفواتير. الأصناف اللي ليها أكتر من مورد في الأول، مترتبة بفرق التوفير.</p>
+<div class="card table-wrap"><table>
+  <thead><tr><th>الصنف</th><th>أرخص مورد</th><th>متوسط سعره</th><th>باقي الموردين</th><th>التوفير</th></tr></thead>
+  <tbody>
+  {% for c in comparisons %}
+  <tr>
+    <td>{{ c.name }} <span class="small muted">({{ c.n }} مرة)</span></td>
+    <td><b>{{ c.cheapest.vendor }}</b></td>
+    <td class="num">{{ c.cheapest.avg|money }}</td>
+    <td class="small">{% for v in c.vendors[1:] %}{{ v.vendor }}: <span class="num">{{ v.avg|money }}</span>{% if not loop.last %} · {% endif %}{% else %}<span class="muted">مورد واحد بس</span>{% endfor %}</td>
+    <td class="num">{% if c.saving_pct > 0 %}{{ '%.0f'|format(c.saving_pct) }}%{% else %}-{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="5" class="muted">لسه مفيش أصناف بأسعار. الأصناف بتتسجل من القراءة الذكية أو لما الموظف يكتبها.</td></tr>{% endfor %}
+  </tbody></table></div>
+
+<h2>الموردين حسب التصنيف</h2>
+<p class="muted small">مترتبين من الأقل لمتوسط الفاتورة. ده مفيد للصيانة والخدمات اللي مفيهاش أصناف ثابتة.</p>
+{% for cat, vendors in grouped.items() %}
+<div class="card table-wrap"><b>{{ cat }}</b>
+  <table style="margin-top:6px"><thead><tr><th>المورد</th><th>عدد الفواتير</th><th>متوسط الفاتورة</th><th class="hide-sm">أقل فاتورة</th><th>الإجمالي</th><th class="hide-sm">آخر تعامل</th></tr></thead>
+  <tbody>{% for v in vendors %}
+    <tr><td><a href="/admin/vendors/{{ v.vendor_id }}">{{ v.vendor }}</a>{% if loop.first and vendors|length > 1 %} <span class="pill approved">الأرخص</span>{% endif %}</td>
+      <td class="num">{{ v.n }}</td><td class="num">{{ v.avg_total|money }}</td><td class="hide-sm num">{{ v.min_total|money }}</td>
+      <td class="num">{{ v.total|money }}</td><td class="hide-sm num">{{ v.last_date or '-' }}</td></tr>
+  {% endfor %}</tbody></table></div>
+{% else %}<div class="card muted">لسه مفيش فواتير كفاية.</div>{% endfor %}
+{% endblock %}

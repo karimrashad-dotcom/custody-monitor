@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% from "_macros.html" import balance, invoice_table %}
+{% block content %}
+<h1>أهلاً {{ user.full_name }}</h1>
+{% for c in custodies %}
+<div class="card">
+  <div class="row">
+    <b>{{ c.custody.name }}</b>
+    <span class="spacer"></span>
+    <span class="small muted">أسبوع {{ c.week.start_date }} إلى {{ c.week.end_date }}</span>
+  </div>
+  <div style="margin:10px 0">{{ balance(c.totals) }}</div>
+  <div class="small muted">حد الفاتورة الواحدة: <span class="num">{{ c.custody.per_invoice_limit|money }}</span> ريال</div>
+  <div class="row" style="margin-top:12px">
+    <a class="btn primary" href="/upload?custody_id={{ c.custody.id }}">📷 صوّر فاتورة</a>
+    <a class="btn" href="/weeks/{{ c.week.id }}">تفاصيل الأسبوع وكشف العهدة</a>
+  </div>
+</div>
+{% else %}
+<div class="card muted">مفيش عهدة مسجلة باسمك لسه. كلم مدير النظام.</div>
+{% endfor %}
+<h2>فواتيري</h2>
+<div class="card">{{ invoice_table(invoices) }}</div>
+{% endblock %}

@@ -1,0 +1,36 @@
+{% macro status_pill(s) %}<span class="pill {{ s }}">{{ STATUS_LABELS[s] }}</span>{% endmacro %}
+
+{% macro balance(t) %}
+{% set pct = (t.spent / t.opening * 100) if t.opening else 0 %}
+<div class="bar {% if t.remaining < 0 %}over{% endif %}"><span style="width: {{ [pct, 100]|min }}%"></span></div>
+<div class="row small muted" style="margin-top:4px">
+  <span>صرف <b class="num">{{ t.spent|money }}</b> من <span class="num">{{ t.opening|money }}</span></span>
+  <span class="spacer"></span>
+  <span>المتبقي <b class="num" {% if t.remaining < 0 %}style="color:var(--danger)"{% endif %}>{{ t.remaining|money }}</b></span>
+</div>
+{% endmacro %}
+
+{% macro invoice_table(invoices, show_user=false) %}
+<div class="table-wrap"><table>
+  <thead><tr>
+    <th>#</th>{% if show_user %}<th>الموظف</th>{% endif %}<th>المورد</th><th class="hide-sm">رقم الفاتورة</th>
+    <th class="hide-sm">التاريخ</th><th class="hide-sm">التصنيف</th><th>الإجمالي</th><th>الحالة</th>
+  </tr></thead>
+  <tbody>
+  {% for i in invoices %}
+    <tr>
+      <td><a href="/invoices/{{ i.id }}{% if i.status == 'draft' %}/edit{% endif %}">{{ i.id }}</a></td>
+      {% if show_user %}<td>{{ i.full_name }}</td>{% endif %}
+      <td><a href="/invoices/{{ i.id }}{% if i.status == 'draft' %}/edit{% endif %}">{{ i.vendor_name or 'بدون مورد' }}</a></td>
+      <td class="hide-sm">{{ i.invoice_number or '-' }}</td>
+      <td class="hide-sm num">{{ i.invoice_date or '-' }}</td>
+      <td class="hide-sm">{{ i.category_name or '-' }}</td>
+      <td class="num">{{ i.total|money }}</td>
+      <td>{{ status_pill(i.status) }}{% if i.over_limit %} <span class="pill flag">فوق الحد</span>{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="8" class="muted">مفيش فواتير.</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endmacro %}

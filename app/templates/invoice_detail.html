@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status_pill %}
+{% block content %}
+<div class="row"><h1>فاتورة #{{ inv.id }}</h1> {{ status_pill(inv.status) }}{% if inv.over_limit %} <span class="pill flag">فوق الحد</span>{% endif %}
+  <span class="spacer"></span>
+  {% if user.role == 'admin' or inv.status in ('draft','pending') %}<a class="btn sm" href="/invoices/{{ inv.id }}/edit">تعديل</a>{% endif %}
+</div>
+<div class="split">
+  <div class="card"><a href="/invoices/{{ inv.id }}/image" target="_blank"><img class="invoice-img" src="/invoices/{{ inv.id }}/image" alt="صورة الفاتورة"></a></div>
+  <div>
+    <div class="card"><table>
+      <tr><th>الموظف</th><td>{{ inv.full_name }} · {{ inv.custody_name }}</td></tr>
+      <tr><th>الأسبوع</th><td><a href="/weeks/{{ inv.week_id }}">{{ inv.start_date }} إلى {{ inv.end_date }}</a></td></tr>
+      <tr><th>المورد</th><td>{% if user.role == 'admin' and inv.vendor_id %}<a href="/admin/vendors/{{ inv.vendor_id }}">{{ inv.vendor_name }}</a>{% else %}{{ inv.vendor_name or '-' }}{% endif %}
+        {% if inv.vendor_vat %}<div class="small muted num" dir="ltr">{{ inv.vendor_vat }}</div>{% endif %}</td></tr>
+      <tr><th>رقم الفاتورة</th><td dir="ltr" style="text-align:right">{{ inv.invoice_number or '-' }}</td></tr>
+      <tr><th>التاريخ</th><td class="num">{{ inv.invoice_date or '-' }}</td></tr>
+      <tr><th>التصنيف</th><td>{{ inv.category_name or '-' }}</td></tr>
+      <tr><th>قبل الضريبة</th><td class="num">{{ inv.subtotal|money }}</td></tr>
+      <tr><th>الضريبة</th><td class="num">{{ inv.vat_amount|money }}</td></tr>
+      <tr><th>الإجمالي</th><td class="num"><b>{{ inv.total|money }}</b> <span class="muted small">(الحد {{ inv.per_invoice_limit|money }})</span></td></tr>
+      {% if inv.description %}<tr><th>ملاحظة</th><td>{{ inv.description }}</td></tr>{% endif %}
+      <tr><th>القراءة</th><td>{{ SOURCE_LABELS.get(inv.extraction_source, inv.extraction_source) }}</td></tr>
+      {% if inv.reviewed_at %}<tr><th>المراجعة</th><td>{{ inv.reviewer_name }} · {{ inv.reviewed_at[:16] }}{% if inv.review_notes %}<div>{{ inv.review_notes }}</div>{% endif %}</td></tr>{% endif %}
+    </table></div>
+    {% if items %}<div class="card"><b>الأصناف</b><div class="table-wrap"><table>
+      <tr><th>الصنف</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr>
+      {% for it in items %}<tr><td>{{ it.description }}</td><td class="num">{{ it.quantity if it.quantity is not none else '-' }}</td><td class="num">{{ it.unit_price|money }}</td><td class="num">{{ it.line_total|money }}</td></tr>{% endfor %}
+    </table></div></div>{% endif %}
+    {% for a in alerts %}<div class="flash warn">{{ KIND_LABELS.get(a.kind, a.kind) }}: {{ a.message }}</div>{% endfor %}
+    {% if user.role == 'admin' and inv.status != 'draft' and inv.week_status == 'open' %}
+    <form class="card" method="post" action="/admin/invoices/{{ inv.id }}/review">
+      <div class="field"><label>ملاحظة المراجعة</label><input name="notes" value="{{ inv.review_notes or '' }}"></div>
+      <input type="hidden" name="next" value="/admin/invoices">
+      <div class="row">
+        <button class="btn ok" name="decision" value="approved">اعتماد</button>
+        <button class="btn danger" name="decision" value="rejected">رفض</button>
+        {% if inv.status != 'pending' %}<button class="btn" name="decision" value="pending">رجوع للمراجعة</button>{% endif %}
+      </div>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,292 @@
+"""استخراج بيانات الفاتورة من الصورة.
+
+الترتيب:
+1. كود QR الخاص بالفاتورة الإلكترونية (هيئة الزكاة والضريبة والجمارك): مجاني ويشتغل من غير نت.
+   بيدي: اسم المورد، الرقم الضريبي، التاريخ، الإجمالي، الضريبة.
+2. قراءة الصورة بـ Claude (لو فيه مفتاح API): بيكمّل رقم الفاتورة والأصناف والتصنيف.
+3. لو الاتنين مش متاحين، الموظف يكتب البيانات بإيده.
+"""
+from __future__ import annotations
+
+import base64
+import io
+import json
+import logging
+from dataclasses import dataclass, field
+
+log = logging.getLogger("custody.extract")
+
+DEFAULT_MODEL = "claude-opus-5-5"
+
+
+@dataclass
+class Extraction:
+    invoice_number: str = ""
+    vendor_name: str = ""
+    vendor_vat_number: str = ""
+    invoice_date: str = ""
+    subtotal: float | None = None
+    vat_amount: float | None = None
+    total: float | None = None
+    category: str = ""
+    items: list[dict] = field(default_factory=list)
+    sources: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+    raw: dict = field(default_factory=dict)
+
+    @property
+    def source_label(self) -> str:
+        return "+".join(self.sources) if self.sources else "manual"
+
+
+# ---------------- QR (ZATCA TLV) ----------------
+def parse_zatca_tlv(payload: str) -> dict | None:
+    """يفك نص QR بتاع الفاتورة السعودية (TLV مشفر Base64)."""
+    try:
+        data = base64.b64decode(payload.strip() + "=" * (-len(payload.strip()) % 4))
+    except Exception:
+        return None
+    fields: dict[int, str] = {}
+    i = 0
+    while i + 2 <= len(data):
+        tag, length = data[i], data[i + 1]
+        value = data[i + 2 : i + 2 + length]
+        if len(value) != length:
+            break
+        if tag in (1, 2, 3, 4, 5):
+            try:
+                fields[tag] = value.decode("utf-8")
+            except UnicodeDecodeError:
+                return None
+        i += 2 + length
+    if not {1, 2, 4}.issubset(fields):
+        return None
+    return {
+        "vendor_name": fields.get(1, ""),
+        "vendor_vat_number": fields.get(2, ""),
+        "timestamp": fields.get(3, ""),
+        "total": fields.get(4, ""),
+        "vat_amount": fields.get(5, ""),
+    }
+
+
+def decode_qr(image_bytes: bytes) -> str | None:
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:  # pragma: no cover
+        log.warning("OpenCV غير متاح، تخطي قراءة QR")
+        return None
+    arr = np.frombuffer(image_bytes, dtype=np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is None:
+        return None
+    detector = cv2.QRCodeDetector()
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    candidates = [img, gray]
+    h, w = gray.shape[:2]
+    if max(h, w) < 1600:
+        candidates.append(cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC))
+    candidates.append(cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1])
+    for candidate in candidates:
+        try:
+            text, _, _ = detector.detectAndDecode(candidate)
+        except cv2.error:
+            continue
+        if text:
+            return text
+    return None
+
+
+def _to_float(value) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return round(float(str(value).replace(",", "")), 2)
+    except ValueError:
+        return None
+
+
+def from_qr(image_bytes: bytes, result: Extraction) -> None:
+    text = decode_qr(image_bytes)
+    if not text:
+        return
+    parsed = parse_zatca_tlv(text)
+    if not parsed:
+        result.notes.append("فيه كود QR بس مش بصيغة الفاتورة الإلكترونية")
+        return
+    result.sources.append("qr")
+    result.raw["qr"] = parsed
+    result.vendor_name = parsed["vendor_name"]
+    result.vendor_vat_number = parsed["vendor_vat_number"]
+    result.total = _to_float(parsed["total"])
+    result.vat_amount = _to_float(parsed["vat_amount"])
+    if result.total is not None and result.vat_amount is not None:
+        result.subtotal = round(result.total - result.vat_amount, 2)
+    if parsed["timestamp"]:
+        result.invoice_date = parsed["timestamp"][:10]
+
+
+# ---------------- Claude ----------------
+_NUM = {"anyOf": [{"type": "number"}, {"type": "null"}]}
+
+INVOICE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "is_invoice": {"type": "boolean"},
+        "invoice_number": {"type": "string"},
+        "vendor_name": {"type": "string"},
+        "vendor_vat_number": {"type": "string"},
+        "invoice_date": {"type": "string"},
+        "subtotal": _NUM,
+        "vat_amount": _NUM,
+        "total": _NUM,
+        "category": {"type": "string"},
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string"},
+                    "quantity": _NUM,
+                    "unit_price": _NUM,
+                    "line_total": _NUM,
+                },
+                "required": ["description", "quantity", "unit_price", "line_total"],
+                "additionalProperties": False,
+            },
+        },
+        "notes": {"type": "string"},
+    },
+    "required": [
+        "is_invoice", "invoice_number", "vendor_name", "vendor_vat_number",
+        "invoice_date", "subtotal", "vat_amount", "total", "category", "items", "notes",
+    ],
+    "additionalProperties": False,
+}
+
+PROMPT = """This is a photo of a purchase or maintenance invoice from Saudi Arabia, taken on a phone by an employee who pays from a petty-cash custody.
+Read it and return the fields in the schema.
+
+- invoice_number: the invoice / receipt number exactly as printed (رقم الفاتورة). Empty string if none.
+- vendor_name: the seller's name as printed, preferring the Arabic name if both exist.
+- vendor_vat_number: the seller's 15-digit VAT registration number (الرقم الضريبي). Empty string if none.
+- invoice_date: YYYY-MM-DD (convert Hijri to Gregorian if only Hijri is shown). Empty string if unreadable.
+- subtotal: amount before VAT; vat_amount: VAT amount (usually 15%); total: final amount paid including VAT. Numbers in SAR, no currency symbols. null when not shown.
+- items: each line item with description, quantity, unit price (before VAT if shown that way) and line total. Empty list if the lines are unreadable.
+- category: choose exactly one of: {categories}
+- is_invoice: false if the image is not an invoice or receipt.
+- notes: one short Arabic sentence about anything doubtful (blurry, handwritten, totals don't add up). Empty string if fine.
+Never guess numbers you cannot read: use null instead."""
+
+
+def from_claude(image_bytes: bytes, media_type: str, api_key: str, model: str,
+                categories: list[str], result: Extraction) -> None:
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=api_key, timeout=120, max_retries=2)
+    b64 = base64.standard_b64encode(image_bytes).decode("ascii")
+    try:
+        response = client.beta.messages.create(
+            model=model,
+            max_tokens=8000,
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",
+            output_config={
+                "effort": "low",
+                "format": {"type": "json_schema", "schema": INVOICE_SCHEMA},
+            },
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}},
+                    {"type": "text", "text": PROMPT.format(categories="، ".join(categories))},
+                ],
+            }],
+        )
+    except anthropic.AuthenticationError:
+        result.notes.append("مفتاح Claude API غير صحيح، راجع الإعدادات")
+        return
+    except anthropic.RateLimitError:
+        result.notes.append("خدمة القراءة الذكية مشغولة، اكتب البيانات يدوياً أو جرب تاني")
+        return
+    except anthropic.APIStatusError as exc:
+        log.exception("Claude API error")
+        result.notes.append(f"تعذرت القراءة الذكية (خطأ {exc.status_code})")
+        return
+    except anthropic.APIConnectionError:
+        result.notes.append("مفيش اتصال بالإنترنت للقراءة الذكية")
+        return
+
+    if response.stop_reason == "refusal":
+        result.notes.append("القراءة الذكية رفضت الصورة، اكتب البيانات يدوياً")
+        return
+    text = next((b.text for b in response.content if b.type == "text"), "")
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        result.notes.append("رد القراءة الذكية غير مكتمل")
+        return
+
+    result.sources.append("ai")
+    result.raw["ai"] = data
+    if not data.get("is_invoice", True):
+        result.notes.append("الصورة دي مش شبه فاتورة")
+    # QR أدق في الأرقام والمورد، فالذكاء الاصطناعي بيكمّل الناقص بس
+    if not result.invoice_number:
+        result.invoice_number = (data.get("invoice_number") or "").strip()
+    if not result.vendor_name:
+        result.vendor_name = (data.get("vendor_name") or "").strip()
+    if not result.vendor_vat_number:
+        result.vendor_vat_number = (data.get("vendor_vat_number") or "").strip()
+    if not result.invoice_date:
+        result.invoice_date = (data.get("invoice_date") or "").strip()
+    for key in ("subtotal", "vat_amount", "total"):
+        if getattr(result, key) is None:
+            setattr(result, key, _to_float(data.get(key)))
+    result.category = data.get("category") or ""
+    result.items = [
+        {
+            "description": (it.get("description") or "").strip(),
+            "quantity": _to_float(it.get("quantity")),
+            "unit_price": _to_float(it.get("unit_price")),
+            "line_total": _to_float(it.get("line_total")),
+        }
+        for it in data.get("items") or []
+        if (it.get("description") or "").strip()
+    ]
+    if data.get("notes"):
+        result.notes.append(data["notes"])
+
+
+def prepare_image(raw: bytes, max_side: int = 2000) -> tuple[bytes, str]:
+    """يعدل اتجاه الصورة ويصغرها ويحولها JPEG عشان المساحة والقراءة."""
+    from PIL import Image, ImageOps
+
+    img = Image.open(io.BytesIO(raw))
+    img = ImageOps.exif_transpose(img)
+    if img.mode not in ("RGB", "L"):
+        img = img.convert("RGB")
+    img.thumbnail((max_side, max_side))
+    out = io.BytesIO()
+    img.save(out, format="JPEG", quality=85, optimize=True)
+    return out.getvalue(), "image/jpeg"
+
+
+def extract_invoice(image_bytes: bytes, media_type: str, api_key: str = "",
+                    model: str = DEFAULT_MODEL, categories: list[str] | None = None,
+                    original_bytes: bytes | None = None) -> Extraction:
+    result = Extraction()
+    # QR بيتقري أحسن من الصورة الأصلية قبل التصغير
+    from_qr(original_bytes or image_bytes, result)
+    if not result.sources and original_bytes:
+        from_qr(image_bytes, result)
+    needs_ai = not result.invoice_number or result.total is None or not result.items
+    if api_key and needs_ai:
+        from_claude(image_bytes, media_type, api_key, model or DEFAULT_MODEL,
+                    categories or [], result)
+    if result.subtotal is None and result.total is not None and result.vat_amount is not None:
+        result.subtotal = round(result.total - result.vat_amount, 2)
+    if not result.sources and not api_key:
+        result.notes.append("مفيش QR واضح، والقراءة الذكية مش مفعلة، اكتب البيانات يدوياً")
+    return result

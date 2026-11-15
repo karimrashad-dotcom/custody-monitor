@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>رفع فاتورة</h1>
+<form class="card" method="post" action="/upload" enctype="multipart/form-data" id="upform">
+  {% if custodies|length > 1 %}
+  <div class="field"><label>العهدة</label>
+    <select name="custody_id">{% for c in custodies %}<option value="{{ c.id }}" {% if c.id == selected %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select>
+  </div>
+  {% else %}<input type="hidden" name="custody_id" value="{{ custodies[0].id }}">{% endif %}
+  <div class="camera-box">
+    <div>صوّر الفاتورة كلها في إضاءة كويسة، وخلي كود QR واضح لو موجود.</div>
+    <input type="file" name="image" accept="image/*" capture="environment" required id="img">
+    <img id="preview" alt="">
+  </div>
+  <div style="margin-top:14px"><button class="btn primary big" id="send">اقرأ الفاتورة</button></div>
+  <div class="loading" id="loading">جاري قراءة الفاتورة… ممكن تاخد لحد 30 ثانية</div>
+</form>
+<script>
+const img = document.getElementById('img'), prev = document.getElementById('preview');
+img.addEventListener('change', () => {
+  const f = img.files[0]; if (!f) return;
+  prev.src = URL.createObjectURL(f); prev.style.display = 'block';
+});
+document.getElementById('upform').addEventListener('submit', () => {
+  document.getElementById('send').disabled = true;
+  document.getElementById('loading').style.display = 'block';
+});
+</script>
+{% endblock %}
