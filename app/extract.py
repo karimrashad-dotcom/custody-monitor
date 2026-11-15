@@ -16,7 +16,9 @@ from dataclasses import dataclass, field
 
 log = logging.getLogger("custody.extract")
 
-DEFAULT_MODEL = "claude-opus-5-5"
+DEFAULT_MODEL = "claude-haiku-5-5"
+# موديلات بتدعم الرجوع التلقائي لموديل تاني لو الطلب اترفض
+FALLBACK_MODELS = {"claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-2"}
 
 
 @dataclass
@@ -187,11 +189,13 @@ def from_claude(image_bytes: bytes, media_type: str, api_key: str, model: str,
     client = anthropic.Anthropic(api_key=api_key, timeout=120, max_retries=2)
     b64 = base64.standard_b64encode(image_bytes).decode("ascii")
     try:
+        extra = {}
+        if model in FALLBACK_MODELS:
+            extra = {"betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"}
         response = client.beta.messages.create(
             model=model,
             max_tokens=8000,
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
+            **extra,
             output_config={
                 "effort": "low",
                 "format": {"type": "json_schema", "schema": INVOICE_SCHEMA},

@@ -9,10 +9,11 @@
       {% for k, d in [('5','السبت'),('6','الأحد'),('0','الاثنين')] %}<option value="{{ k }}" {% if v.week_start_weekday == k %}selected{% endif %}>{{ d }}</option>{% endfor %}</select></div>
   </div>
   <h2>القراءة الذكية للفواتير (Claude)</h2>
-  <p class="small muted">من غير مفتاح، البرنامج بيقرا كود QR بتاع الفاتورة الإلكترونية بس، والباقي يدوي. المفتاح بيتعمل من console.anthropic.com.</p>
+  <p class="small muted">من غير مفتاح، البرنامج بيقرا كود QR بتاع الفاتورة الإلكترونية بس، والباقي يدوي. المفتاح بيتعمل من console.anthropic.com وده حساب منفصل عن اشتراك Pro، بيتحاسب بالاستخدام.</p>
   <div class="fields">
     <div class="field"><label>مفتاح API</label><input name="anthropic_api_key" type="password" value="{{ '********' if v.anthropic_api_key else '' }}" dir="ltr" autocomplete="off"></div>
-    <div class="field"><label>الموديل</label><input name="anthropic_model" value="{{ v.anthropic_model }}" dir="ltr"></div>
+    <div class="field"><label>الموديل</label><select name="anthropic_model">
+      {% for k, d in [('claude-haiku-5-5','Haiku: الأرخص (أقل من دولار في الشهر تقريباً)'),('claude-sonnet-5-5','Sonnet: متوسط'),('claude-opus-5-5','Opus: الأدق للخط اليدوي (أغلى)')] %}<option value="{{ k }}" {% if v.anthropic_model == k %}selected{% endif %}>{{ d }}</option>{% endfor %}</select></div>
   </div>
   <h2>تنبيهات الإيميل (اختياري)</h2>
   <p class="small muted">التنبيهات بتظهر جوه البرنامج دايماً. لو عاوزها توصل إيميل كمان املا البيانات دي (مثلاً من Outlook أو Gmail).</p>

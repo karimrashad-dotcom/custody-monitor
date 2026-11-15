@@ -179,5 +179,5 @@ def test_claude_path(monkeypatch):
     res = extract.extract_invoice(buf.getvalue(), "image/jpeg", api_key="k", categories=["قرطاسية ومطبوعات"])
     assert res.sources == ["ai"] and res.invoice_number == "INV-9" and res.total == 115
     assert res.items[0]["unit_price"] == 50
-    assert captured["model"] == "claude-opus-5-5"
+    assert captured["model"] == "claude-haiku-5-5" and "fallbacks" not in captured
     assert captured["output_config"]["format"]["type"] == "json_schema"
