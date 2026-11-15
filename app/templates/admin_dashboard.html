@@ -1,13 +1,17 @@
 {% extends "base.html" %}
 {% from "_macros.html" import balance %}
+{% from "_icons.html" import icon %}
+{% block mtitle %}الرئيسية{% endblock %}
 {% block content %}
-<h1>لوحة المدير</h1>
+<div class="page-head"><h1>لوحة المدير</h1>
+  <div class="actions"><a class="btn" href="/admin/reports">{{ icon('chart', 18) }} التقارير</a>
+  <a class="btn primary" href="/admin/invoices?status=pending">{{ icon('receipt', 18) }} مراجعة الفواتير</a></div></div>
 {% if not ai_enabled and not ocr_ok %}<div class="flash warn">قراءة صور الفواتير مش شغالة: البرنامج بيقرا QR بس. ثبّت Tesseract (مجاني) أو حط مفتاح Claude API، التفاصيل في <a href="/admin/settings">الإعدادات</a>.</div>{% endif %}
 <div class="grid">
-  <a class="card stat" href="/admin/invoices?status=pending"><div class="label">مستنية مراجعة</div><div class="value num">{{ pending }}</div><div class="sub">{{ over_limit }} منها فوق الحد</div></a>
-  <a class="card stat" href="/admin/alerts"><div class="label">تنبيهات جديدة</div><div class="value num">{{ unread_alerts }}</div></a>
-  <div class="card stat"><div class="label">مصروف الأسبوع المفتوح</div><div class="value num">{{ open_spent|money }}</div><div class="sub">من {{ open_amount|money }} ريال عهد</div></div>
-  <div class="card stat"><div class="label">مصروف الشهر</div><div class="value num">{{ month_total|money }}</div></div>
+  <a class="card stat" href="/admin/invoices?status=pending"><div class="label">{{ icon("receipt", 16) }} مستنية مراجعة</div><div class="value num">{{ pending }}</div><div class="sub">{{ over_limit }} منها فوق الحد</div></a>
+  <a class="card stat" href="/admin/alerts"><div class="label">{{ icon("bell", 16) }} تنبيهات جديدة</div><div class="value num">{{ unread_alerts }}</div></a>
+  <div class="card stat"><div class="label">{{ icon("wallet", 16) }} مصروف الأسبوع المفتوح</div><div class="value num">{{ open_spent|money }}</div><div class="sub">من {{ open_amount|money }} ريال عهد</div></div>
+  <div class="card stat kpi accent"><div class="label">{{ icon("chart", 16) }} مصروف الشهر</div><div class="value num">{{ month_total|money }}</div></div>
 </div>
 
 <h2>العهد في الأسبوع الحالي</h2>

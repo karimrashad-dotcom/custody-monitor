@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% from "_macros.html" import status_pill %}
+{% block title %}التقارير{% endblock %}
+{% block mtitle %}التقارير{% endblock %}
+{% macro hbars(rows, empty='مفيش بيانات في الفترة دي') %}
+  {% if rows %}<ul class="hbars">
+  {% for r in rows %}<li><span class="lbl" title="{{ r.label }}">{{ r.label }}</span>
+    <span class="trk"><span style="width: {{ r.bar }}%"></span></span>
+    <span class="val">{{ r.total|money }}<small>{{ r.n }} فاتورة · {{ '%.0f'|format(r.share) }}%</small></span></li>
+  {% endfor %}</ul>{% else %}<div class="empty small">{{ empty }}</div>{% endif %}
+{% endmacro %}
+{% block content %}
+<div class="page-head">
+  <h1>التقارير</h1>
+  <div class="actions no-print">
+    <a class="btn" href="/admin/reports/export.xlsx?{{ qs }}">{{ icon('download', 18) }} Excel</a>
+    <button class="btn" onclick="window.print()">{{ icon('print', 18) }} طباعة / PDF</button>
+  </div>
+  <p class="print-only">الفترة: {{ f.date_from or 'البداية' }} إلى {{ f.date_to or 'النهاية' }}</p>
+</div>
+
+<details class="card filters-form" id="filters" open>
+<summary class="row"><span>{{ icon('filter', 18) }}</span><b>الفلاتر</b>
+  <span class="small muted">{{ f.date_from or 'البداية' }} ← {{ f.date_to or 'النهاية' }}</span></summary>
+<script>if (window.innerWidth < 700) document.getElementById('filters').removeAttribute('open');</script>
+<form method="get" action="/admin/reports" style="margin-top:14px">
+  <input type="hidden" name="tab" value="{{ tab }}">
+  <div class="chips">
+    {% for key, label in presets %}<a class="chip" href="/admin/reports?tab={{ tab }}&preset={{ key }}">{{ label }}</a>{% endfor %}
+    <a class="chip" href="/admin/reports?tab={{ tab }}&date_from=&date_to=&preset=all">كل الفترات</a>
+  </div>
+  <div class="filters">
+    <div class="field"><label>من تاريخ</label><input type="date" name="date_from" value="{{ f.date_from }}"></div>
+    <div class="field"><label>إلى تاريخ</label><input type="date" name="date_to" value="{{ f.date_to }}"></div>
+    <div class="field"><label>الموظف</label><select name="user_id"><option value="">الكل</option>
+      {% for u in opts.users %}<option value="{{ u.id }}" {% if f.user_id == u.id|string %}selected{% endif %}>{{ u.full_name }}</option>{% endfor %}</select></div>
+    <div class="field"><label>العهدة</label><select name="custody_id"><option value="">الكل</option>
+      {% for c in opts.custodies %}<option value="{{ c.id }}" {% if f.custody_id == c.id|string %}selected{% endif %}>{{ c.full_name }} · {{ c.name }}</option>{% endfor %}</select></div>
+    <div class="field"><label>التصنيف</label><select name="category_id"><option value="">الكل</option>
+      {% for c in opts.categories %}<option value="{{ c.id }}" {% if f.category_id == c.id|string %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></div>
+    <div class="field"><label>القسم</label><select name="department_id"><option value="">الكل</option>
+      {% for d in opts.departments %}<option value="{{ d.id }}" {% if f.department_id == d.id|string %}selected{% endif %}>{{ d.name }}</option>{% endfor %}</select></div>
+    <div class="field"><label>المورد</label><select name="vendor_id"><option value="">الكل</option>
+      {% for v in opts.vendors %}<option value="{{ v.id }}" {% if f.vendor_id == v.id|string %}selected{% endif %}>{{ v.name }}</option>{% endfor %}</select></div>
+    <div class="field"><label>الحالة</label><select name="status">
+      {% for k, l in [('active','معتمدة + مستنية'),('approved','معتمدة بس'),('pending','مستنية بس'),('rejected','مرفوضة'),('all','الكل')] %}
+      <option value="{{ k }}" {% if f.status == k %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+    <div class="field"><button class="btn primary" style="width:100%">{{ icon('filter', 18) }} عرض</button></div>
+  </div>
+</form>
+</details>
+
+<nav class="tabs">
+  {% for key, label in tabs %}<a class="{{ 'on' if tab == key }}" href="/admin/reports?tab={{ key }}&{{ qs }}">{{ label }}</a>{% endfor %}
+</nav>
+
+{% if tab == 'summary' %}
+  {% set k = data.kpi %}
+  <div class="grid">
+    <div class="card kpi accent"><div class="label">إجمالي المصروف</div>
+      <div class="value num">{{ k.total|money }}<small>ريال</small></div>
+      <div class="sub">{% if data.prev and data.prev.change is not none %}
+        <span class="delta">{{ icon('up' if data.prev.change > 0 else 'down', 13) }}{{ '%.0f'|format(data.prev.change|abs) }}%</span>
+        عن الفترة اللي قبلها ({{ data.prev.total|money }})
+      {% else %}شامل الضريبة{% endif %}</div></div>
+    <div class="card kpi"><div class="label">عدد الفواتير</div><div class="value num">{{ k.n }}</div>
+      <div class="sub">متوسط الفاتورة {{ (k.avg or 0)|money }}</div></div>
+    <div class="card kpi"><div class="label">الضريبة المدفوعة</div><div class="value num">{{ k.vat|money }}</div>
+      <div class="sub">قبل الضريبة {{ k.subtotal|money }}</div></div>
+    <div class="card kpi"><div class="label">فواتير فوق الحد</div><div class="value num" {% if k.over_limit %}style="color:var(--danger)"{% endif %}>{{ k.over_limit or 0 }}</div>
+      <div class="sub">{{ k.vendors }} مورد · {{ k.employees }} موظف</div></div>
+  </div>
+
+  <section class="card">
+    <h2 class="card-title">{{ icon('chart', 18) }} المصروف حسب الشهر</h2>
+    {% if data.by_month %}
+    {% set top = data.by_month|map(attribute='total')|max %}
+    <div class="vbars">
+      {% for m in data.by_month %}<div class="col" title="{{ m.label }}: {{ m.total|money }}">
+        <i>{{ m.total|money }}</i><span class="b" style="height: {{ (m.total / top * 100) if top else 0 }}%"></span><em>{{ m.label }}</em></div>{% endfor %}
+    </div>{% else %}<div class="empty small">مفيش بيانات في الفترة دي</div>{% endif %}
+  </section>
+
+  <div class="split">
+    <section class="card"><h2 class="card-title">{{ icon('tags', 18) }} حسب التصنيف</h2>{{ hbars(data.by_category) }}</section>
+    <section class="card"><h2 class="card-title">{{ icon('users', 18) }} حسب القسم</h2>{{ hbars(data.by_department) }}</section>
+    <section class="card"><h2 class="card-title">{{ icon('user', 18) }} حسب الموظف</h2>{{ hbars(data.by_employee) }}</section>
+    <section class="card"><h2 class="card-title">{{ icon('store', 18) }} أكبر الموردين</h2>{{ hbars(data.by_vendor) }}</section>
+  </div>
+
+{% elif tab == 'custody' %}
+  <div class="card table-wrap"><table>
+    <thead><tr><th>الموظف</th><th>العهدة</th><th class="hide-sm">القسم</th><th class="hide-sm">الأسابيع</th>
+      <th>مبلغ العهدة</th><th>المصروف</th><th>المتبقي</th><th style="min-width:120px">الاستهلاك</th>
+      <th class="hide-sm">فواتير</th><th class="hide-sm">مستنية</th><th class="hide-sm">مرفوضة</th><th class="hide-sm">فوق الحد</th><th class="hide-sm" title="فواتير مرفوعة ومش موجودة في بيان العهدة">مش في البيان</th></tr></thead>
+    <tbody>
+    {% for r in data.rows %}<tr>
+      <td>{{ r.full_name }}</td><td>{{ r.name }}</td><td class="hide-sm">{{ r.department or '-' }}</td><td class="hide-sm num">{{ r.weeks }}</td>
+      <td class="num">{{ r.opening|money }}</td><td class="num"><b>{{ r.spent|money }}</b></td>
+      <td class="num" {% if r.remaining < 0 %}style="color:var(--danger)"{% endif %}>{{ r.remaining|money }}</td>
+      <td><div class="bar {% if r.pct > 100 %}over{% endif %}"><span style="width: {{ [r.pct, 100]|min }}%"></span></div><span class="small muted num">{{ '%.0f'|format(r.pct) }}%</span></td>
+      <td class="hide-sm num">{{ r.n }}</td>
+      <td class="hide-sm">{% if r.pending %}<span class="pill pending">{{ r.pending }}</span>{% else %}-{% endif %}</td>
+      <td class="hide-sm">{% if r.rejected %}<span class="pill rejected">{{ r.rejected }}</span>{% else %}-{% endif %}</td>
+      <td class="hide-sm">{% if r.over %}<span class="pill flag">{{ r.over }}</span>{% else %}-{% endif %}</td>
+      <td class="hide-sm">{% if r.unlinked %}<span class="pill pending">{{ r.unlinked }}</span>{% else %}-{% endif %}</td>
+    </tr>{% else %}<tr><td colspan="13" class="empty">مفيش عهد في الفترة دي</td></tr>{% endfor %}
+    </tbody>
+    {% if data.rows %}<tfoot><tr><td colspan="2">الإجمالي</td><td class="hide-sm"></td><td class="hide-sm"></td>
+      <td class="num">{{ data.rows|sum(attribute='opening')|money }}</td><td class="num">{{ data.rows|sum(attribute='spent')|money }}</td>
+      <td class="num">{{ data.rows|sum(attribute='remaining')|money }}</td><td colspan="6"></td></tr></tfoot>{% endif %}
+  </table></div>
+  <p class="small muted">العهدة بتتحسب بالأسابيع اللي فيها جزء من الفترة. المصروف = الفواتير المعتمدة والمستنية.</p>
+
+{% elif tab == 'cheapest' %}
+  <div class="grid">
+    <div class="card kpi accent"><div class="label">التوفير الممكن</div><div class="value num">{{ data.total_saving|money }}<small>ريال</small></div>
+      <div class="sub">لو كل تصنيف اتشرى من أرخص مورد فيه (بمتوسط الفاتورة)</div></div>
+    <div class="card kpi"><div class="label">تصنيفات فيها أكتر من مورد</div><div class="value num">{{ data.categories|selectattr('saving')|list|length }}</div>
+      <div class="sub">من {{ data.categories|length }} تصنيف</div></div>
+    <div class="card kpi"><div class="label">أصناف بأسعار متقارنة</div><div class="value num">{{ data['items']|selectattr('diff_pct')|list|length }}</div>
+      <div class="sub">الأصناف بتتسجل من تفاصيل الفاتورة</div></div>
+  </div>
+  {% for c in data.categories %}
+  <section class="card">
+    <div class="row"><h2 class="card-title" style="margin:0">{{ c.name }}</h2><span class="spacer"></span>
+      {% if c.saving %}<span class="pill best">توفير ممكن {{ c.saving|money }}</span>{% endif %}
+      <span class="small muted">{{ c.n }} فاتورة · {{ c.total|money }}</span></div>
+    <div class="table-wrap" style="margin-top:10px"><table>
+      <thead><tr><th>المورد</th><th>متوسط الفاتورة</th><th class="hide-sm">أقل فاتورة</th><th>عدد</th><th class="hide-sm">الإجمالي</th><th class="hide-sm">آخر شراء</th></tr></thead>
+      <tbody>{% for v in c.vendors %}<tr>
+        <td><a href="/admin/vendors/{{ v.vendor_id }}">{{ v.vendor }}</a> {% if loop.first and c.vendors|length > 1 %}<span class="pill best">{{ icon('check', 13) }} الأرخص</span>{% endif %}</td>
+        <td class="num">{{ v.avg|money }}</td><td class="hide-sm num">{{ v.min|money }}</td><td class="num">{{ v.n }}</td>
+        <td class="hide-sm num">{{ v.total|money }}</td><td class="hide-sm num">{{ v.last_date or '-' }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </section>
+  {% else %}<div class="card empty">مفيش فواتير بموردين في الفترة دي</div>{% endfor %}
+  {% if data['items'] %}
+  <h2>أرخص سعر لكل صنف</h2>
+  <div class="card table-wrap"><table>
+    <thead><tr><th>الصنف</th><th>أرخص مورد</th><th>سعر الوحدة</th><th class="hide-sm">باقي الموردين</th><th>الفرق عن الأغلى</th></tr></thead>
+    <tbody>{% for it in data['items'] %}<tr><td>{{ it.name }}</td><td>{{ it.cheapest.vendor }}</td><td class="num">{{ it.cheapest.avg|money }}</td>
+      <td class="hide-sm small muted">{% for v in it.vendors[1:4] %}{{ v.vendor }} ({{ v.avg|money }}){% if not loop.last %}، {% endif %}{% endfor %}</td>
+      <td class="num">{% if it.diff_pct %}<span class="pill best">{{ '%.0f'|format(it.diff_pct) }}%</span>{% else %}-{% endif %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% endif %}
+
+{% elif tab == 'exceptions' %}
+  {% macro exc_table(rows, title, hint, ic='alert') %}
+  <section class="card">
+    <div class="row"><h2 class="card-title" style="margin:0">{{ icon(ic, 18) }} {{ title }}</h2><span class="spacer"></span><span class="pill {{ 'flag' if rows else 'approved' }}">{{ rows|length }}</span></div>
+    <p class="small muted" style="margin:4px 0 8px">{{ hint }}</p>
+    {% if rows %}<div class="table-wrap"><table>
+      <thead><tr><th>#</th><th>التاريخ</th><th>الموظف</th><th>المورد</th><th class="hide-sm">رقم الفاتورة</th><th>الإجمالي</th><th>الحالة</th></tr></thead>
+      <tbody>{% for r in rows %}<tr><td><a href="/invoices/{{ r.id }}">{{ r.id }}</a></td><td class="num">{{ r.d }}</td><td>{{ r.full_name }}</td>
+        <td>{{ r.vendor or '-' }}</td><td class="hide-sm">{{ r.invoice_number or '-' }}</td><td class="num">{{ r.total|money }}</td><td>{{ status_pill(r.status) }}</td></tr>{% endfor %}</tbody>
+    </table></div>{% endif %}
+  </section>
+  {% endmacro %}
+  {{ exc_table(data.over, 'فواتير فوق حد العهدة', 'الفاتورة الواحدة أكبر من الحد المسموح في عهدة الموظف.') }}
+  {{ exc_table(data.duplicates, 'فواتير مكررة', 'نفس رقم الفاتورة ونفس المورد، أو نفس الصورة اترفعت قبل كده.') }}
+  {{ exc_table(data.no_vat, 'موردين من غير رقم ضريبي', 'فواتير 100 ريال أو أكتر والمورد ملوش رقم ضريبي، يعني الضريبة ممكن متتخصمش.', 'receipt') }}
+  {{ exc_table(data.rejected, 'فواتير مرفوضة', 'فواتير المدير رفضها.', 'receipt') }}
+  <section class="card">
+    <div class="row"><h2 class="card-title" style="margin:0">{{ icon('alert', 18) }} مصروف في البيان من غير فاتورة</h2><span class="spacer"></span><span class="pill {{ 'flag' if data.unmatched_lines else 'approved' }}">{{ data.unmatched_lines|length }}</span></div>
+    <p class="small muted" style="margin:4px 0 8px">سطور في بيان العهدة ملهاش فاتورة مرفوعة.</p>
+    {% if data.unmatched_lines %}<div class="table-wrap"><table>
+      <thead><tr><th>الأسبوع</th><th>الموظف</th><th>البيان</th><th>المبلغ</th><th></th></tr></thead>
+      <tbody>{% for r in data.unmatched_lines %}<tr><td class="num">{{ r.start_date }}</td><td>{{ r.full_name }}</td><td>{{ r.description }}</td>
+        <td class="num">{{ r.amount|money }}</td><td><a class="btn sm" href="/weeks/{{ r.week_id }}/reconcile">مراجعة</a></td></tr>{% endfor %}</tbody>
+    </table></div>{% endif %}
+  </section>
+
+{% else %}
+  <div class="card table-wrap"><table>
+    <thead><tr><th>#</th><th>التاريخ</th><th>الموظف</th><th class="hide-sm">القسم</th><th class="hide-sm">التصنيف</th><th>المورد</th>
+      <th class="hide-sm">رقم الفاتورة</th><th class="hide-sm">البيان</th><th>الإجمالي</th><th>الحالة</th></tr></thead>
+    <tbody>{% for i in data.rows %}<tr>
+      <td><a href="/invoices/{{ i.id }}">{{ i.id }}</a></td><td class="num">{{ i.d }}</td><td>{{ i.full_name }}</td>
+      <td class="hide-sm">{{ i.department_name or '-' }}</td><td class="hide-sm">{{ i.category_name or '-' }}</td><td>{{ i.vendor_name or '-' }}</td>
+      <td class="hide-sm">{{ i.invoice_number or '-' }}</td><td class="hide-sm small">{{ (i.description or '')[:60] }}</td>
+      <td class="num">{{ i.total|money }}</td><td>{{ status_pill(i.status) }}{% if i.over_limit %} <span class="pill flag">فوق الحد</span>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="10" class="empty">مفيش فواتير بالفلاتر دي</td></tr>{% endfor %}</tbody>
+    {% if data.rows %}<tfoot><tr><td colspan="8">الإجمالي ({{ data.rows|length }} فاتورة)</td><td class="num">{{ data.rows|sum(attribute='total')|money }}</td><td></td></tr></tfoot>{% endif %}
+  </table></div>
+  {% if data.rows|length >= 500 %}<p class="small muted">بيظهر أول 500 فاتورة بس. نزّل Excel عشان الكل.</p>{% endif %}
+{% endif %}
+{% endblock %}

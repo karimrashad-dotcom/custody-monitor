@@ -23,6 +23,8 @@ DEFAULT_CATEGORIES = [
     "أخرى",
 ]
 
+DEFAULT_DEPARTMENTS = ["الإدارة", "التسويق", "المبيعات", "المشتريات", "الصيانة", "المالية", "الموارد البشرية"]
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
@@ -57,6 +59,10 @@ CREATE TABLE IF NOT EXISTS weeks (
     close_notes TEXT DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS categories (
+    id INTEGER PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL
+);
+CREATE TABLE IF NOT EXISTS departments (
     id INTEGER PRIMARY KEY,
     name TEXT UNIQUE NOT NULL
 );
@@ -163,6 +169,20 @@ def init_db() -> None:
         for col, typ in (("subtotal", "REAL"), ("vat", "REAL"), ("cost_center", "TEXT DEFAULT ''")):
             if col not in line_cols:
                 db.execute(f"ALTER TABLE statement_lines ADD COLUMN {col} {typ}")
+        for table in ("categories", "departments"):
+            cols = {r["name"] for r in db.execute(f"PRAGMA table_info({table})")}
+            if "active" not in cols:
+                db.execute(f"ALTER TABLE {table} ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
+        inv_cols = {r["name"] for r in db.execute("PRAGMA table_info(invoices)")}
+        if "department_id" not in inv_cols:
+            db.execute("ALTER TABLE invoices ADD COLUMN department_id INTEGER REFERENCES departments(id)")
+        cust_cols = {r["name"] for r in db.execute("PRAGMA table_info(custodies)")}
+        if "department_id" not in cust_cols:
+            db.execute("ALTER TABLE custodies ADD COLUMN department_id INTEGER REFERENCES departments(id)")
+        if not get_setting(db, "departments_seeded"):
+            db.executemany("INSERT OR IGNORE INTO departments(name) VALUES (?)",
+                           [(d,) for d in DEFAULT_DEPARTMENTS])
+            set_setting(db, "departments_seeded", "1")
         if db.execute("SELECT COUNT(*) FROM categories").fetchone()[0] == 0:
             db.executemany(
                 "INSERT INTO categories(name) VALUES (?)",

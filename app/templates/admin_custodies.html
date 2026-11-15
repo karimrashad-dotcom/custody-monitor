@@ -8,26 +8,28 @@
     <div class="field"><label>اسم العهدة</label><input name="name" required placeholder="مثلاً: عهدة الصيانة"></div>
     <div class="field"><label>المبلغ الأسبوعي (ريال)</label><input name="weekly_amount" required inputmode="decimal" dir="ltr"></div>
     <div class="field"><label>حد الفاتورة الواحدة (ريال)</label><input name="per_invoice_limit" required inputmode="decimal" dir="ltr"></div>
+    <div class="field"><label>القسم</label><select name="department_id"><option value="">بدون</option>{% for d in departments %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}</select></div>
   </div>
   <button class="btn primary">إضافة</button>
 </form></details>
 <div class="card table-wrap"><table>
-  <thead><tr><th>الموظف</th><th>العهدة</th><th>المبلغ الأسبوعي</th><th>حد الفاتورة</th><th>الحالة</th><th></th></tr></thead>
+  <thead><tr><th>الموظف</th><th>العهدة</th><th class="hide-sm">القسم</th><th>المبلغ الأسبوعي</th><th>حد الفاتورة</th><th>الحالة</th><th></th></tr></thead>
   <tbody>
   {% for c in custodies %}
   <tr {% if not c.active %}class="muted"{% endif %}>
-    <td>{{ c.full_name }}</td><td>{{ c.name }}</td><td class="num">{{ c.weekly_amount|money }}</td><td class="num">{{ c.per_invoice_limit|money }}</td>
+    <td>{{ c.full_name }}</td><td>{{ c.name }}</td><td class="hide-sm">{{ c.department_name or '-' }}</td><td class="num">{{ c.weekly_amount|money }}</td><td class="num">{{ c.per_invoice_limit|money }}</td>
     <td>{{ 'نشطة' if c.active else 'موقوفة' }}</td>
     <td><details><summary class="small">تعديل</summary>
       <form method="post" action="/admin/custodies/{{ c.id }}" style="margin-top:6px;min-width:200px">
         <div class="field"><label>الاسم</label><input name="name" value="{{ c.name }}"></div>
         <div class="field"><label>المبلغ الأسبوعي</label><input name="weekly_amount" value="{{ c.weekly_amount }}" dir="ltr"></div>
         <div class="field"><label>حد الفاتورة</label><input name="per_invoice_limit" value="{{ c.per_invoice_limit }}" dir="ltr"></div>
+        <div class="field"><label>القسم</label><select name="department_id"><option value="">بدون</option>{% for d in departments %}<option value="{{ d.id }}" {% if d.id == c.department_id %}selected{% endif %}>{{ d.name }}</option>{% endfor %}</select></div>
         <button class="btn sm">حفظ</button></form>
       <form method="post" action="/admin/custodies/{{ c.id }}" style="margin-top:6px"><input type="hidden" name="action" value="toggle">
         <button class="btn sm danger">{{ 'إيقاف' if c.active else 'تفعيل' }}</button></form>
     </details></td>
   </tr>
-  {% else %}<tr><td colspan="6" class="muted">مفيش عهد لسه.</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="7" class="muted">مفيش عهد لسه.</td></tr>{% endfor %}
   </tbody></table></div>
 {% endblock %}

@@ -44,11 +44,5 @@
   </div>
   <button class="btn primary">حفظ الإعدادات</button>
 </form>
-<div class="card">
-  <h2 style="margin-top:0">التصنيفات</h2>
-  <table>{% for c in categories %}<tr><td>
-    <form class="row" method="post" action="/admin/categories"><input type="hidden" name="rename_id" value="{{ c.id }}">
-      <input name="new_name" value="{{ c.name }}" style="flex:1"><button class="btn sm">حفظ</button></form></td></tr>{% endfor %}</table>
-  <form class="row" method="post" action="/admin/categories" style="margin-top:10px"><input name="name" placeholder="تصنيف جديد" style="flex:1"><button class="btn sm primary">إضافة</button></form>
-</div>
+<div class="card"><b>التصنيفات والأقسام</b> بقت ليها صفحة لوحدها: <a href="/admin/lists">التصنيفات والأقسام</a></div>
 {% endblock %}

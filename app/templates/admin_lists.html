@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}التصنيفات والأقسام{% endblock %}
+{% block content %}
+<div class="page-head"><h1>التصنيفات والأقسام</h1>
+  <p class="muted">التصنيف = نوع المصروف (وقود، صيانة، ضيافة...). القسم = الجهة اللي اتصرف عليها (التسويق، المبيعات...). الاتنين بيظهروا للموظف وقت الفاتورة وبيستخدموا في التقارير.</p></div>
+<div class="split">
+{% for table, title, hint in [('categories','التصنيفات','مثلاً: إعلانات، هدايا عملاء'),('departments','الأقسام','مثلاً: التسويق')] %}
+  <section class="card">
+    <h2 class="card-title">{{ title }} <span class="muted small">({{ lists[table]|selectattr('active')|list|length }} نشط)</span></h2>
+    <form class="row" method="post" action="/admin/lists/{{ table }}">
+      <input type="hidden" name="action" value="add">
+      <input name="name" placeholder="{{ hint }}" required style="flex:1"><button class="btn primary">إضافة</button>
+    </form>
+    <ul class="list">
+    {% for c in lists[table] %}
+      <li class="{% if not c.active %}inactive{% endif %}">
+        <form class="row grow" method="post" action="/admin/lists/{{ table }}">
+          <input type="hidden" name="action" value="rename"><input type="hidden" name="item_id" value="{{ c.id }}">
+          <input name="name" value="{{ c.name }}" aria-label="الاسم"><button class="btn sm">حفظ</button>
+        </form>
+        <span class="muted small num">{{ c.used }} فاتورة</span>
+        <form method="post" action="/admin/lists/{{ table }}"><input type="hidden" name="item_id" value="{{ c.id }}">
+          <input type="hidden" name="action" value="toggle"><button class="btn sm ghost">{{ 'إيقاف' if c.active else 'تفعيل' }}</button></form>
+        {% if not c.used %}<form method="post" action="/admin/lists/{{ table }}"><input type="hidden" name="item_id" value="{{ c.id }}">
+          <input type="hidden" name="action" value="delete"><button class="btn sm danger">مسح</button></form>{% endif %}
+      </li>
+    {% else %}<li class="muted">لسه مفيش.</li>{% endfor %}
+    </ul>
+  </section>
+{% endfor %}
+</div>
+{% endblock %}

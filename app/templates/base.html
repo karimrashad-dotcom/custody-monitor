@@ -1,41 +1,75 @@
+{% from "_icons.html" import icon %}
+{% set path = request.url.path %}
+{% macro nav(href, label, ic, badge=0, exact=false) -%}
+  {% set on = (path == href) if exact else (path == href or path.startswith(href ~ '/')) %}
+  <a href="{{ href }}" class="{{ 'on' if on }}" {% if on %}aria-current="page"{% endif %}>{{ icon(ic) }}<span>{{ label }}</span>{% if badge %}<b class="badge">{{ badge }}</b>{% endif %}</a>
+{%- endmacro %}
 <!doctype html>
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0f6b5c">
-  <title>{% block title %}مراقبة العهد{% endblock %}</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b5c50">
+  <title>{% block title %}مراقبة العهد{% endblock %}{% if company %} · {{ company }}{% endif %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/static/style.css?v=3">
 </head>
-<body>
-<header class="top">
-  <div class="wrap">
-    <a class="brand" href="/">مراقبة العهد{% if company %} · {{ company }}{% endif %}</a>
-    {% if user %}
-    <nav class="links">
-      {% if user.role == 'admin' %}
-        <a href="/admin">الرئيسية</a>
-        {% if has_custody %}<a href="/me">عهدتي</a><a href="/upload">رفع فاتورة</a>{% endif %}
-        <a href="/admin/invoices">الفواتير</a>
-        <a href="/admin/weeks">الأسابيع</a>
-        <a href="/admin/vendors">الموردين</a>
-        <a href="/admin/alerts">التنبيهات {% if unread_alerts %}<span class="badge">{{ unread_alerts }}</span>{% endif %}</a>
-        <a href="/admin/custodies">العهد</a>
-        <a href="/admin/users">الموظفين</a>
-        <a href="/admin/settings">الإعدادات</a>
-      {% else %}
-        <a href="/me">عهدتي</a>
-        <a href="/upload">رفع فاتورة</a>
-      {% endif %}
-      <a href="/account" title="{{ user.full_name }}">حسابي</a>
-      <a href="/logout">خروج</a>
-    </nav>
-    {% endif %}
+<body class="{{ 'has-nav' if user else 'no-nav' }} {{ 'is-admin' if user and user.role == 'admin' else 'is-emp' }}">
+{% if user %}
+<input type="checkbox" id="navtoggle" class="navtoggle" hidden>
+<aside class="side">
+  <div class="side-brand">
+    <span class="logo">{{ icon('wallet', 22) }}</span>
+    <div><b>مراقبة العهد</b>{% if company %}<small>{{ company }}</small>{% endif %}</div>
   </div>
+  <nav class="side-nav">
+    {% if user.role == 'admin' %}
+      <div class="nav-group">الإدارة</div>
+      {{ nav('/admin', 'الرئيسية', 'home', exact=true) }}
+      {{ nav('/admin/invoices', 'الفواتير', 'receipt') }}
+      {{ nav('/admin/weeks', 'الأسابيع', 'calendar') }}
+      {{ nav('/admin/reports', 'التقارير', 'chart') }}
+      {{ nav('/admin/vendors', 'الموردين', 'store') }}
+      {{ nav('/admin/alerts', 'التنبيهات', 'bell', unread_alerts) }}
+      <div class="nav-group">الإعداد</div>
+      {{ nav('/admin/custodies', 'العهد', 'wallet') }}
+      {{ nav('/admin/users', 'الموظفين', 'users') }}
+      {{ nav('/admin/lists', 'التصنيفات والأقسام', 'tags') }}
+      {{ nav('/admin/settings', 'الإعدادات', 'settings') }}
+      {% if has_custody %}<div class="nav-group">عهدتي</div>
+      {{ nav('/me', 'عهدتي', 'wallet') }}{{ nav('/upload', 'رفع فاتورة', 'camera') }}{% endif %}
+    {% else %}
+      {{ nav('/me', 'عهدتي', 'home') }}
+      {{ nav('/upload', 'رفع فاتورة', 'camera') }}
+    {% endif %}
+  </nav>
+  <div class="side-foot">
+    <a href="/account" class="me">{{ icon('user', 18) }}<span>{{ user.full_name }}</span></a>
+    <a href="/logout" class="out" title="خروج">{{ icon('logout', 18) }}</a>
+  </div>
+</aside>
+<label for="navtoggle" class="scrim" aria-hidden="true"></label>
+<header class="mbar">
+  <label for="navtoggle" class="iconbtn" aria-label="القائمة">{{ icon('menu') }}</label>
+  <b>{% block mtitle %}مراقبة العهد{% endblock %}</b>
+  {% if user.role == 'admin' %}<a href="/admin/alerts" class="iconbtn" aria-label="التنبيهات">{{ icon('bell') }}{% if unread_alerts %}<b class="dot"></b>{% endif %}</a>
+  {% else %}<a href="/upload" class="iconbtn" aria-label="رفع فاتورة">{{ icon('camera') }}</a>{% endif %}
 </header>
-<main class="wrap">
+{% endif %}
+<main class="main">
+  <div class="content">
   {% for kind, msg in messages %}<div class="flash {{ kind }}">{{ msg }}</div>{% endfor %}
   {% block content %}{% endblock %}
+  </div>
 </main>
+{% if user and user.role != 'admin' %}
+<nav class="tabbar">
+  {{ nav('/me', 'عهدتي', 'home') }}
+  <a href="/upload" class="fab {{ 'on' if path.startswith('/upload') }}">{{ icon('camera', 24) }}<span>صوّر فاتورة</span></a>
+  {{ nav('/account', 'حسابي', 'user') }}
+</nav>
+{% endif %}
 </body>
 </html>

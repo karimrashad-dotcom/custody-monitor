@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import sqlite3
 import logging
 import uuid
 from datetime import date, datetime
@@ -116,8 +117,14 @@ def to_float(value) -> float | None:
         return None
 
 
-def categories(db):
-    return db.execute("SELECT * FROM categories ORDER BY id").fetchall()
+def categories(db, include_inactive: bool = False):
+    where = "" if include_inactive else "WHERE active=1"
+    return db.execute(f"SELECT * FROM categories {where} ORDER BY name").fetchall()
+
+
+def departments(db, include_inactive: bool = False):
+    where = "" if include_inactive else "WHERE active=1"
+    return db.execute(f"SELECT * FROM departments {where} ORDER BY name").fetchall()
 
 
 # ======================= الدخول =======================
@@ -311,12 +318,13 @@ async def upload(request: Request, custody_id: int = Form(...), image: UploadFil
         cur = db.execute(
             """INSERT INTO invoices(week_id,custody_id,user_id,vendor_id,category_id,invoice_number,
                  invoice_date,subtotal,vat_amount,total,image_path,image_sha256,
-                 extraction_source,extraction_raw)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 extraction_source,extraction_raw,department_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+                       (SELECT department_id FROM custodies WHERE id=?))""",
             (week["id"], custody_id, user["id"], vendor_id, cat["id"] if cat else None,
              ext.invoice_number, ext.invoice_date, ext.subtotal, ext.vat_amount, ext.total,
              rel, sha, ext.source_label,
-             json.dumps({"raw": ext.raw, "notes": ext.notes}, ensure_ascii=False)),
+             json.dumps({"raw": ext.raw, "notes": ext.notes}, ensure_ascii=False), custody_id),
         )
         inv_id = cur.lastrowid
         for it in ext.items:
@@ -336,6 +344,7 @@ def load_invoice(db, invoice_id: int, user, for_edit: bool = False):
     inv = db.execute(
         """SELECT i.*, v.name AS vendor_name, v.vat_number AS vendor_vat, c.name AS custody_name,
                   c.per_invoice_limit, u.full_name, cat.name AS category_name, w.status AS week_status,
+                  dep.name AS department_name, c.department_id AS custody_department_id,
                   w.start_date, w.end_date, r.full_name AS reviewer_name
            FROM invoices i
            JOIN custodies c ON c.id=i.custody_id
@@ -343,6 +352,7 @@ def load_invoice(db, invoice_id: int, user, for_edit: bool = False):
            JOIN weeks w ON w.id=i.week_id
            LEFT JOIN vendors v ON v.id=i.vendor_id
            LEFT JOIN categories cat ON cat.id=i.category_id
+           LEFT JOIN departments dep ON dep.id=i.department_id
            LEFT JOIN users r ON r.id=i.reviewed_by
            WHERE i.id=?""",
         (invoice_id,),
@@ -374,7 +384,7 @@ def invoice_edit_form(request: Request, invoice_id: int):
         inv = load_invoice(db, invoice_id, user, for_edit=True)
         items = db.execute("SELECT * FROM invoice_items WHERE invoice_id=?", (invoice_id,)).fetchall()
         return render(request, db, "invoice_edit.html", user=user, inv=inv, items=items,
-                      categories=categories(db))
+                      categories=categories(db), departments=departments(db))
 
 
 @app.post("/invoices/{invoice_id}/edit")
@@ -396,15 +406,16 @@ async def invoice_edit(request: Request, invoice_id: int):
                                               form.get("vendor_vat_number", ""),
                                               invoice_id=invoice_id, prefer_name=True)
         cat_id = form.get("category_id") or None
+        dep_id = form.get("department_id") or None
         week_id = inv["week_id"]
         if inv["week_status"] == "closed" and inv["status"] == "draft":
             week_id = dbm.get_or_open_week(db, inv["custody_id"])["id"]
         db.execute(
             """UPDATE invoices SET vendor_id=?, category_id=?, invoice_number=?, invoice_date=?,
-                 subtotal=?, vat_amount=?, total=?, description=?, week_id=? WHERE id=?""",
+                 subtotal=?, vat_amount=?, total=?, description=?, week_id=?, department_id=? WHERE id=?""",
             (vendor_id, cat_id, form.get("invoice_number", "").strip(),
              form.get("invoice_date", "").strip(), subtotal, vat, total,
-             form.get("description", "").strip(), week_id, invoice_id),
+             form.get("description", "").strip(), week_id, dep_id, invoice_id),
         )
         db.execute("DELETE FROM invoice_items WHERE invoice_id=?", (invoice_id,))
         descs = form.getlist("item_description")
@@ -814,6 +825,128 @@ def invoices_export(request: Request, date_from: str = "", date_to: str = ""):
     return xlsx_response(wb, f"invoices-{date.today()}.xlsx")
 
 
+# ======================= التقارير =======================
+REPORT_TABS = [("summary", "تحليل المصروفات"), ("custody", "العهد"), ("cheapest", "الأرخص"),
+               ("exceptions", "الاستثناءات"), ("invoices", "كل الفواتير")]
+
+
+def report_options(db):
+    return {
+        "users": db.execute("SELECT id, full_name FROM users WHERE role!='admin' OR id IN "
+                            "(SELECT user_id FROM custodies) ORDER BY full_name").fetchall(),
+        "custodies": db.execute("SELECT c.id, c.name, u.full_name FROM custodies c JOIN users u "
+                                "ON u.id=c.user_id ORDER BY u.full_name").fetchall(),
+        "categories": categories(db, include_inactive=True),
+        "departments": departments(db, include_inactive=True),
+        "vendors": db.execute("SELECT id, name FROM vendors ORDER BY name").fetchall(),
+    }
+
+
+@app.get("/admin/reports")
+def admin_reports(request: Request, tab: str = "summary"):
+    from . import reports as rep
+    with get_db() as db:
+        admin = require_admin(request, db)
+        raw = dict(request.query_params)
+        if not raw.get("date_from") and not raw.get("date_to") and "preset" not in raw:
+            raw["preset"] = "this_month"
+        f = rep.clean_filters(raw)
+        tab = tab if tab in dict(REPORT_TABS) else "summary"
+        data = {}
+        if tab == "summary":
+            data = rep.summary(db, f)
+        elif tab == "custody":
+            data = {"rows": rep.custody_report(db, f)}
+        elif tab == "cheapest":
+            data = rep.cheapest_report(db, f)
+        elif tab == "exceptions":
+            data = rep.exceptions_report(db, f)
+        else:
+            data = {"rows": rep.invoice_rows(db, f, limit=500)}
+        qs = "&".join(f"{k}={v}" for k, v in f.items() if v)
+        return render(request, db, "admin_reports.html", user=admin, f=f, tab=tab, tabs=REPORT_TABS,
+                      data=data, opts=report_options(db), presets=rep.PRESETS, qs=qs)
+
+
+@app.get("/admin/reports/export.xlsx")
+def admin_reports_export(request: Request):
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl import Workbook
+
+    from . import reports as rep
+    with get_db() as db:
+        require_admin(request, db)
+        f = rep.clean_filters(dict(request.query_params))
+        summ = rep.summary(db, f)
+        cust = rep.custody_report(db, f)
+        cheap = rep.cheapest_report(db, f)
+        exc = rep.exceptions_report(db, f)
+        rows = rep.invoice_rows(db, f, limit=20000)
+    wb = Workbook()
+    head_fill = PatternFill("solid", fgColor="E3F2EF")
+
+    def sheet(title, headers, data):
+        ws = new_sheet(wb, title)
+        ws.append(headers)
+        for c in ws[1]:
+            c.font = Font(bold=True)
+            c.fill = head_fill
+        for r in data:
+            ws.append(r)
+        for i, h in enumerate(headers, 1):
+            ws.column_dimensions[ws.cell(1, i).column_letter].width = max(12, len(str(h)) + 4)
+        ws.freeze_panes = "A2"
+        return ws
+
+    k = summ["kpi"]
+    ws = sheet("الملخص", ["البند", "القيمة"], [
+        ["من", f["date_from"] or "البداية"], ["إلى", f["date_to"] or "النهاية"],
+        ["عدد الفواتير", k["n"]], ["قبل الضريبة", round(k["subtotal"] or 0, 2)],
+        ["الضريبة", round(k["vat"] or 0, 2)], ["الإجمالي", round(k["total"] or 0, 2)],
+        ["متوسط الفاتورة", round(k["avg"] or 0, 2)], ["فواتير فوق الحد", k["over_limit"] or 0],
+        ["التوفير الممكن لو الشراء من الأرخص", round(cheap["total_saving"], 2)],
+    ])
+    ws.column_dimensions["A"].width = 36
+    for title, key in (("حسب التصنيف", "by_category"), ("حسب القسم", "by_department"),
+                       ("حسب الموظف", "by_employee"), ("حسب المورد", "by_vendor"), ("حسب الشهر", "by_month")):
+        sheet(title, ["البند", "عدد الفواتير", "الإجمالي", "الضريبة", "متوسط الفاتورة", "النسبة %"],
+              [[r["label"], r["n"], round(r["total"], 2), round(r["vat"], 2), round(r["avg"] or 0, 2),
+                round(r["share"], 1)] for r in summ[key]])
+    sheet("العهد", ["الموظف", "العهدة", "القسم", "الأسابيع", "مبلغ العهدة", "المصروف", "المتبقي",
+                    "عدد الفواتير", "مستنية", "مرفوضة", "فوق الحد", "مش في البيان"],
+          [[r["full_name"], r["name"], r["department"] or "", r["weeks"], round(r["opening"], 2),
+            round(r["spent"], 2), round(r["remaining"], 2), r["n"], r["pending"], r["rejected"], r["over"],
+            r["unlinked"]] for r in cust])
+    cheap_rows = []
+    for c in cheap["categories"]:
+        for idx, v in enumerate(c["vendors"]):
+            cheap_rows.append([c["name"], v["vendor"], v["n"], round(v["avg"], 2), round(v["min"], 2),
+                               round(v["total"], 2), "الأرخص" if idx == 0 else "", round(c["saving"], 2) if idx == 0 else ""])
+    sheet("الأرخص حسب التصنيف", ["التصنيف", "المورد", "عدد الفواتير", "متوسط الفاتورة", "أقل فاتورة",
+                                  "الإجمالي", "", "التوفير الممكن"], cheap_rows)
+    sheet("الأرخص حسب الصنف", ["الصنف", "أرخص مورد", "سعر الوحدة عنده", "عدد الموردين", "الفرق عن الأغلى %"],
+          [[it["name"], it["cheapest"]["vendor"], round(it["cheapest"]["avg"], 2), len(it["vendors"]),
+            round(it["diff_pct"], 1)] for it in cheap["items"]])
+    exc_rows = []
+    for label, key in (("فوق الحد", "over"), ("مكررة", "duplicates"), ("مورد من غير رقم ضريبي", "no_vat"),
+                       ("مرفوضة", "rejected")):
+        for r in exc[key]:
+            exc_rows.append([label, r["id"], r["d"], r["full_name"], r["vendor"] or "", r["invoice_number"] or "",
+                             r["total"], STATUS_LABELS[r["status"]]])
+    for r in exc["unmatched_lines"]:
+        exc_rows.append(["سطر في البيان من غير فاتورة", "", r["line_date"], r["full_name"], r["description"],
+                         "", r["amount"], ""])
+    sheet("الاستثناءات", ["النوع", "#", "التاريخ", "الموظف", "المورد / البيان", "رقم الفاتورة", "المبلغ", "الحالة"],
+          exc_rows)
+    sheet("الفواتير", ["#", "التاريخ", "الموظف", "العهدة", "القسم", "التصنيف", "المورد", "الرقم الضريبي",
+                       "رقم الفاتورة", "البيان", "قبل الضريبة", "الضريبة", "الإجمالي", "الحالة", "فوق الحد"],
+          [[r["id"], r["d"], r["full_name"], r["custody_name"], r["department_name"] or "", r["category_name"] or "",
+            r["vendor_name"] or "", r["vat_number"] or "", r["invoice_number"] or "", r["description"] or "",
+            r["subtotal"], r["vat_amount"], r["total"], STATUS_LABELS[r["status"]], "نعم" if r["over_limit"] else ""]
+           for r in rows])
+    return xlsx_response(wb, f"report-{f['date_from'] or 'all'}-{f['date_to'] or date.today()}.xlsx")
+
+
 # ======================= المدير =======================
 @app.get("/admin")
 def admin_dashboard(request: Request):
@@ -977,24 +1110,27 @@ def admin_custodies(request: Request):
     with get_db() as db:
         admin = require_admin(request, db)
         custodies = db.execute(
-            """SELECT c.*, u.full_name FROM custodies c JOIN users u ON u.id=c.user_id
+            """SELECT c.*, u.full_name, d.name AS department_name FROM custodies c
+               JOIN users u ON u.id=c.user_id LEFT JOIN departments d ON d.id=c.department_id
                ORDER BY c.active DESC, u.full_name"""
         ).fetchall()
         users = db.execute("SELECT id, full_name FROM users WHERE active=1 ORDER BY full_name").fetchall()
-        return render(request, db, "admin_custodies.html", user=admin, custodies=custodies, users=users)
+        return render(request, db, "admin_custodies.html", user=admin, custodies=custodies, users=users,
+                      departments=departments(db))
 
 
 @app.post("/admin/custodies")
 def admin_custody_create(request: Request, user_id: int = Form(...), name: str = Form(...),
-                         weekly_amount: str = Form(...), per_invoice_limit: str = Form(...)):
+                         weekly_amount: str = Form(...), per_invoice_limit: str = Form(...),
+                         department_id: str = Form("")):
     with get_db() as db:
         require_admin(request, db)
         amount, limit = to_float(weekly_amount), to_float(per_invoice_limit)
         if not amount or not limit:
             flash(request, "اكتب مبلغ العهدة والحد بالأرقام", "error")
             return go("/admin/custodies")
-        db.execute("INSERT INTO custodies(user_id,name,weekly_amount,per_invoice_limit) VALUES (?,?,?,?)",
-                   (user_id, name.strip(), amount, limit))
+        db.execute("INSERT INTO custodies(user_id,name,weekly_amount,per_invoice_limit,department_id)"
+                   " VALUES (?,?,?,?,?)", (user_id, name.strip(), amount, limit, department_id or None))
         flash(request, "اتضافت العهدة")
         return go("/admin/custodies")
 
@@ -1002,7 +1138,7 @@ def admin_custody_create(request: Request, user_id: int = Form(...), name: str =
 @app.post("/admin/custodies/{custody_id}")
 def admin_custody_update(request: Request, custody_id: int, action: str = Form("update"),
                          name: str = Form(""), weekly_amount: str = Form(""),
-                         per_invoice_limit: str = Form("")):
+                         per_invoice_limit: str = Form(""), department_id: str = Form("")):
     with get_db() as db:
         require_admin(request, db)
         if action == "toggle":
@@ -1012,8 +1148,8 @@ def admin_custody_update(request: Request, custody_id: int, action: str = Form("
             if not amount or not limit:
                 flash(request, "اكتب مبلغ العهدة والحد بالأرقام", "error")
                 return go("/admin/custodies")
-            db.execute("UPDATE custodies SET name=?, weekly_amount=?, per_invoice_limit=? WHERE id=?",
-                       (name.strip(), amount, limit, custody_id))
+            db.execute("UPDATE custodies SET name=?, weekly_amount=?, per_invoice_limit=?, department_id=?"
+                       " WHERE id=?", (name.strip(), amount, limit, department_id or None, custody_id))
             db.execute("UPDATE weeks SET opening_amount=? WHERE custody_id=? AND status='open'",
                        (amount, custody_id))
         flash(request, "اتحفظت العهدة")
@@ -1190,17 +1326,56 @@ async def admin_settings_save(request: Request):
         return go("/admin/settings")
 
 
-@app.post("/admin/categories")
-def admin_category(request: Request, name: str = Form(""), rename_id: str = Form(""),
-                   new_name: str = Form("")):
+LIST_TABLES = {"categories": "التصنيف", "departments": "القسم"}
+
+
+@app.get("/admin/lists")
+def admin_lists(request: Request):
+    with get_db() as db:
+        admin = require_admin(request, db)
+        data = {}
+        for table, col in (("categories", "category_id"), ("departments", "department_id")):
+            data[table] = db.execute(
+                f"""SELECT t.*, (SELECT COUNT(*) FROM invoices i WHERE i.{col}=t.id) AS used
+                    FROM {table} t ORDER BY t.active DESC, t.name""").fetchall()
+        return render(request, db, "admin_lists.html", user=admin, lists=data)
+
+
+@app.post("/admin/lists/{table}")
+def admin_lists_save(request: Request, table: str, action: str = Form("add"), name: str = Form(""),
+                     item_id: str = Form("")):
+    if table not in LIST_TABLES:
+        raise HTTPException(404)
+    col = "category_id" if table == "categories" else "department_id"
     with get_db() as db:
         require_admin(request, db)
-        if rename_id and new_name.strip():
-            db.execute("UPDATE categories SET name=? WHERE id=?", (new_name.strip(), rename_id))
-        elif name.strip():
-            db.execute("INSERT OR IGNORE INTO categories(name) VALUES (?)", (name.strip(),))
-        flash(request, "اتحفظت التصنيفات")
-        return go("/admin/settings")
+        name = " ".join(name.split())
+        if action == "add" and name:
+            row = db.execute(f"SELECT id FROM {table} WHERE name=?", (name,)).fetchone()
+            if row:
+                db.execute(f"UPDATE {table} SET active=1 WHERE id=?", (row["id"],))
+            else:
+                db.execute(f"INSERT INTO {table}(name) VALUES (?)", (name,))
+            flash(request, f"اتضاف {LIST_TABLES[table]}: {name}")
+        elif action == "rename" and name and item_id:
+            try:
+                db.execute(f"UPDATE {table} SET name=? WHERE id=?", (name, item_id))
+                flash(request, "اتحفظ الاسم")
+            except sqlite3.IntegrityError:
+                flash(request, "الاسم ده موجود قبل كده", "error")
+        elif action == "toggle" and item_id:
+            db.execute(f"UPDATE {table} SET active=1-active WHERE id=?", (item_id,))
+            flash(request, "اتغيرت الحالة")
+        elif action == "delete" and item_id:
+            used = db.execute(f"SELECT COUNT(*) FROM invoices WHERE {col}=?", (item_id,)).fetchone()[0]
+            if used:
+                flash(request, "مينفعش يتمسح لأن عليه فواتير. تقدر توقفه بدل المسح.", "error")
+            else:
+                if table == "departments":
+                    db.execute("UPDATE custodies SET department_id=NULL WHERE department_id=?", (item_id,))
+                db.execute(f"DELETE FROM {table} WHERE id=?", (item_id,))
+                flash(request, "اتمسح")
+        return go("/admin/lists")
 
 
 @app.get("/health")
