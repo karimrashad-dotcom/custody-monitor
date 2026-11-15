@@ -1130,7 +1130,9 @@ def admin_custodies(request: Request):
     with get_db() as db:
         admin = require_admin(request, db)
         custodies = db.execute(
-            """SELECT c.*, u.full_name, d.name AS department_name FROM custodies c
+            """SELECT c.*, u.full_name, d.name AS department_name,
+                      (SELECT COUNT(*) FROM invoices i WHERE i.custody_id=c.id) AS invoice_count
+               FROM custodies c
                JOIN users u ON u.id=c.user_id LEFT JOIN departments d ON d.id=c.department_id
                ORDER BY c.active DESC, u.full_name"""
         ).fetchall()
@@ -1161,6 +1163,19 @@ def admin_custody_update(request: Request, custody_id: int, action: str = Form("
                          per_invoice_limit: str = Form(""), department_id: str = Form("")):
     with get_db() as db:
         require_admin(request, db)
+        if action == "delete":
+            used = db.execute("SELECT COUNT(*) FROM invoices WHERE custody_id=?", (custody_id,)).fetchone()[0]
+            if used:
+                flash(request, f"مينفعش تتحذف لأن عليها {used} فاتورة. وقّفها بدل الحذف.", "error")
+                return go("/admin/custodies")
+            week_ids = [r[0] for r in db.execute("SELECT id FROM weeks WHERE custody_id=?", (custody_id,))]
+            for wid in week_ids:
+                db.execute("DELETE FROM statement_lines WHERE week_id=?", (wid,))
+                db.execute("DELETE FROM alerts WHERE week_id=?", (wid,))
+            db.execute("DELETE FROM weeks WHERE custody_id=?", (custody_id,))
+            db.execute("DELETE FROM custodies WHERE id=?", (custody_id,))
+            flash(request, "اتحذفت العهدة")
+            return go("/admin/custodies")
         if action == "toggle":
             db.execute("UPDATE custodies SET active=1-active WHERE id=?", (custody_id,))
         else:

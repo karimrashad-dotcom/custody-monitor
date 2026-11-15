@@ -28,6 +28,10 @@
         <button class="btn sm">حفظ</button></form>
       <form method="post" action="/admin/custodies/{{ c.id }}" style="margin-top:6px"><input type="hidden" name="action" value="toggle">
         <button class="btn sm danger">{{ 'إيقاف' if c.active else 'تفعيل' }}</button></form>
+      {% if not c.invoice_count %}
+      <form method="post" action="/admin/custodies/{{ c.id }}" style="margin-top:6px" onsubmit="return confirm('حذف العهدة نهائياً؟')">
+        <input type="hidden" name="action" value="delete"><button class="btn sm danger">حذف</button></form>
+      {% else %}<div class="small muted" style="margin-top:6px">عليها {{ c.invoice_count }} فاتورة، فمينفعش تتحذف. وقّفها بدل كده.</div>{% endif %}
     </details></td>
   </tr>
   {% else %}<tr><td colspan="7" class="muted">مفيش عهد لسه.</td></tr>{% endfor %}

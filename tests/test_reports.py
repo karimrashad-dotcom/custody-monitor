@@ -39,3 +39,15 @@ def test_english_switch(admin):
     assert admin.get("/lang?to=ar&next=//evil.com", follow_redirects=False).headers["location"] == "/"
     r = admin.get("/admin/reports")
     assert 'dir="rtl"' in r.text and "التقارير" in r.text
+
+
+def test_delete_empty_custody(admin):
+    admin.post("/admin/custodies", data={"user_id": "1", "name": "عهدة للحذف", "weekly_amount": "100",
+                                         "per_invoice_limit": "50"})
+    from app import db as dbm
+    with dbm.get_db() as db:
+        cid = db.execute("SELECT id FROM custodies WHERE name='عهدة للحذف'").fetchone()[0]
+    r = admin.post(f"/admin/custodies/{cid}", data={"action": "delete"})
+    assert "اتحذفت العهدة" in r.text
+    with dbm.get_db() as db:
+        assert not db.execute("SELECT 1 FROM custodies WHERE id=?", (cid,)).fetchone()
