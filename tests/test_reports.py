@@ -29,3 +29,13 @@ def test_custody_review(admin):
     assert r.status_code in (200, 303)
     assert admin.get("/admin/custody-review/1").status_code == 200
     assert admin.get("/admin/custody-review/99999").status_code == 404
+
+
+def test_english_switch(admin):
+    r = admin.get("/lang?to=en&next=/admin/reports", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/admin/reports"
+    r = admin.get("/admin/reports")
+    assert 'dir="ltr"' in r.text and "Reports" in r.text and "Spending analysis" in r.text
+    assert admin.get("/lang?to=ar&next=//evil.com", follow_redirects=False).headers["location"] == "/"
+    r = admin.get("/admin/reports")
+    assert 'dir="rtl"' in r.text and "التقارير" in r.text

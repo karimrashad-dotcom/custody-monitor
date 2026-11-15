@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "_macros.html" import balance, invoice_table %}
 {% block content %}
-<h1>أهلاً {{ user.full_name }}</h1>
+<h1>أهلاً <span>{{ user.full_name }}</span></h1>
 {% for c in custodies %}
 <div class="card">
   <div class="row">

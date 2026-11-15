@@ -4,6 +4,7 @@
 {% block content %}
 <div class="auth-brand"><span class="logo">{{ icon('wallet', 26) }}</span><b>مراقبة العهد</b>{% if company %}<span class="muted">{{ company }}</span>{% endif %}</div>
 <div class="card" style="padding:24px">
+  <a class="small" style="float:inline-end" href="/lang?to={{ 'ar' if lang == 'en' else 'en' }}&next=/login">{{ 'العربية' if lang == 'en' else 'English' }}</a>
   <h1 style="font-size:20px">تسجيل الدخول</h1>
   <form method="post" action="/login">
     <div class="field"><label>اسم الدخول</label><input name="username" required autocapitalize="none" autocomplete="username" dir="ltr"></div>

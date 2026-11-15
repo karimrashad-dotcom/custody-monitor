@@ -101,11 +101,27 @@ def render(request: Request, db, name: str, **ctx):
         has_custody = bool(db.execute("SELECT 1 FROM custodies WHERE user_id=? AND active=1",
                                       (user["id"],)).fetchone())
     messages = request.session.pop("flash", [])
-    return templates.TemplateResponse(
+    lang = "en" if request.cookies.get("lang") == "en" else "ar"
+    resp = templates.TemplateResponse(
         request, name,
         {"user": user, "unread_alerts": unread, "messages": messages, "has_custody": has_custody,
-         "company": get_setting(db, "company_name", ""), **ctx},
+         "company": get_setting(db, "company_name", ""), "lang": lang, **ctx},
     )
+    if lang == "en":
+        from . import i18n
+        body = i18n.translate_html(resp.body.decode("utf-8")).encode("utf-8")
+        resp.body = body
+        resp.headers["content-length"] = str(len(body))
+    return resp
+
+
+@app.get("/lang")
+def switch_lang(request: Request, to: str = "ar", next: str = "/"):
+    if not next.startswith("/") or next.startswith("//"):
+        next = "/"
+    resp = RedirectResponse(next, status_code=303)
+    resp.set_cookie("lang", "en" if to == "en" else "ar", max_age=60 * 60 * 24 * 365, samesite="lax")
+    return resp
 
 
 def to_float(value) -> float | None:

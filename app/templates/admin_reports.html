@@ -22,7 +22,7 @@
 
 <details class="card filters-form" id="filters" open>
 <summary class="row"><span>{{ icon('filter', 18) }}</span><b>الفلاتر</b>
-  <span class="small muted">{{ f.date_from or 'البداية' }} ← {{ f.date_to or 'النهاية' }}</span></summary>
+  <span class="small muted">{{ f.date_from or 'البداية' }} – {{ f.date_to or 'النهاية' }}</span></summary>
 <script>if (window.innerWidth < 700) document.getElementById('filters').removeAttribute('open');</script>
 <form method="get" action="/admin/reports" style="margin-top:14px">
   <input type="hidden" name="tab" value="{{ tab }}">

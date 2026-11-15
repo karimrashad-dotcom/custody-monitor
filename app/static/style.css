@@ -313,3 +313,8 @@ label.check input { width: 18px; height: 18px; accent-color: var(--primary); }
 
 .theme-btn { background: none; border: 0; color: var(--side-text); padding: 8px; border-radius: 9px; cursor: pointer; display: flex; }
 .theme-btn:hover { background: rgba(255,255,255,.06); }
+
+.lang-btn { font-weight: 700; font-size: 13px; min-width: 34px; justify-content: center; text-decoration: none !important; }
+[dir="ltr"] .side-nav a.on { box-shadow: inset 3px 0 0 var(--side-mark); }
+[dir="ltr"] body { font-family: "IBM Plex Sans", "IBM Plex Sans Arabic", "Segoe UI", Arial, sans-serif; }
+@media (max-width: 960px) { [dir="ltr"] .side { transform: translateX(-100%); } [dir="ltr"] .navtoggle:checked ~ .side { transform: none; } }

@@ -35,7 +35,7 @@
 <div class="card table-wrap"><table>
   <thead><tr><th>الأسبوع</th><th>الحالة</th><th>مبلغ العهدة</th><th>المصروف</th><th>المتبقي</th><th class="hide-sm">الفواتير</th><th class="hide-sm">البيان</th><th></th></tr></thead>
   <tbody>{% for r in weeks %}{% set w = r.week %}<tr>
-    <td class="num">{{ w.start_date }} ← {{ w.end_date }}</td>
+    <td class="num">{{ w.start_date }} – {{ w.end_date }}</td>
     <td><span class="pill {{ w.status }}">{{ 'مفتوح' if w.status == 'open' else 'مقفول' }}</span></td>
     <td class="num">{{ r.totals.opening|money }}</td><td class="num">{{ r.totals.spent|money }}</td>
     <td class="num" {% if r.totals.remaining < 0 %}style="color:var(--danger)"{% endif %}>{{ r.totals.remaining|money }}</td>
