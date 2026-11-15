@@ -79,6 +79,12 @@ TOTAL_WORDS = ["الإجمالي", "الاجمالي", "اجمالي", "إجما
 VAT_WORDS = ["ضريبة", "الضريبة", "القيمة المضافة", "vat", "tax"]
 SUBTOTAL_WORDS = ["قبل الضريبة", "بدون ضريبة", "غير شامل", "subtotal", "sub total", "sub-total",
                   "before vat", "excl", "taxable"]
+# الإجمالي النهائي شامل الضريبة: بنشوفه قبل كلمات الضريبة عشان سطر (الإجمالي بعد الضريبة) ميتحسبش ضريبة
+GRAND_WORDS = ["شامل الضريبة", "شامل ضريبة", "بعد الضريبة", "inclusive", "incl. vat", "incl vat",
+               "after vat", "total after vat", "invoice total", "grand total", "الإجمالي شامل",
+               "الاجمالي شامل", "المبلغ المستحق", "amount due"]
+NOT_GRAND = ["غير شامل", "exclusive", "before", "قبل"]
+INV_CODE_RE = re.compile(r"(?<![A-Za-z])(INV[-/ ]?\d{2,4}[-/]\d{2,8}|INV[-/]?\d{4,10})", re.IGNORECASE)
 INVOICE_NO_RE = re.compile(
     r"(?:رقم\s*(?:ال)?فاتورة|فاتورة\s*رقم|invoice\s*(?:no|number|#)|inv\s*(?:no|#)|receipt\s*(?:no|#)|bill\s*no|رقم\s*الإيصال)"
     r"\s*[:#.\-]*\s*([A-Za-z0-9][A-Za-z0-9\-/]{0,24})",
@@ -103,39 +109,101 @@ def find_date(text: str) -> str:
     return ""
 
 
+# علامات برامج المسح (CamScanner وغيره): مش اسم مورد ولا جزء من الفاتورة
+SCANNER_MARKS = ["camscanner", "cam scanner", "scanned with", "scanned by", "adobe scan",
+                 "microsoft lens", "office lens", "genius scan", "tapscanner", "tap scanner",
+                 "clearscan", "notebloc", "scanner pro", "tinyscanner", "tiny scanner"]
+
+
+def is_scanner_mark(line: str) -> bool:
+    low = " ".join((line or "").lower().split())
+    return any(m in low for m in SCANNER_MARKS)
+
+
+def strip_scanner_marks(text: str) -> str:
+    return "\n".join(ln for ln in (text or "").splitlines() if not is_scanner_mark(ln))
+
+
 def _has(line: str, words) -> bool:
     low = line.lower()
     return any(w in low for w in words)
 
 
-def parse_text(text: str) -> dict:
-    text = normalize(text)
+GENERIC_NAME_WORDS = {"شركة", "شركه", "مؤسسة", "مؤسسه", "company", "co", "ltd", "limited", "est",
+                      "المحدودة", "المحدوده", "التجارية", "التجاريه", "trading", "group", "مجموعة"}
+
+
+def _name_words(name: str) -> set[str]:
+    words = re.findall(r"[^\W\d_]{3,}", (name or "").casefold())
+    return {w for w in words if w not in GENERIC_NAME_WORDS}
+
+
+def _is_own_line(line: str, own_words: set[str]) -> bool:
+    """السطر ده فيه اسم شركتنا (العميل في الفاتورة) مش اسم المورد."""
+    if not own_words:
+        return False
+    found = own_words & _name_words(line)
+    return len(found) >= min(2, len(own_words))
+
+
+def parse_text(text: str, own: dict | None = None) -> dict:
+    """own: بيانات شركتنا (name, vat) عشان منخدهاش على إنها المورد، لأن الفاتورة فيها بيانات العميل كمان."""
+    own = own or {}
+    own_vat = re.sub(r"\D", "", own.get("vat") or "")
+    own_words = _name_words(own.get("name") or "")
+    text = strip_scanner_marks(normalize(text))
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     result: dict = {}
 
-    m = VAT_NO_RE.search(text.replace(" ", ""))
-    if m:
-        result["vendor_vat_number"] = m.group(0)
+    # نشيل بلوك بيانات شركتنا (من سطر الاسم لحد سطر رقمها الضريبي) من دور اسم المورد
+    name_lines = list(lines)
+    own_idx = [i for i, ln in enumerate(lines) if _is_own_line(ln, own_words)]
+    if own_idx and not own_vat:
+        # رقمنا الضريبي مش متسجل: أول رقم ضريبي بعد اسم شركتنا على طول غالباً بتاعنا
+        for ln in lines[own_idx[0]:own_idx[0] + 8]:
+            m = VAT_NO_RE.search(ln.replace(" ", ""))
+            if m:
+                own_vat = m.group(0)
+                break
+    if own_idx:
+        start = own_idx[0]
+        end = start
+        if own_vat:
+            vat_idx = [i for i, ln in enumerate(lines) if own_vat in ln.replace(" ", "") and i >= start]
+            if vat_idx and vat_idx[0] - start <= 10:
+                end = vat_idx[0]
+        name_lines = lines[:start] + lines[end + 1:]
+        name_lines = [ln for ln in name_lines if not _is_own_line(ln, own_words)]
+
+    vats = [v for v in VAT_NO_RE.findall(text.replace(" ", "")) if v != own_vat]
+    if vats:
+        result["vendor_vat_number"] = vats[0]
 
     result["invoice_date"] = find_date(text)
 
     m = INVOICE_NO_RE.search(text)
-    if m and not VAT_NO_RE.fullmatch(m.group(1)):
+    if m and not VAT_NO_RE.fullmatch(m.group(1)) and any(ch.isdigit() for ch in m.group(1)):
         result["invoice_number"] = m.group(1)
+    else:
+        m = INV_CODE_RE.search(text)
+        if m:
+            result["invoice_number"] = m.group(1).replace(" ", "")
 
-    totals, vats, subs = [], [], []
+    totals, vats, subs, grands = [], [], [], []
     for ln in lines:
         nums = [n for n in numbers_in(ln) if n not in (15.0, 15)]
         if not nums:
             continue
-        if _has(ln, SUBTOTAL_WORDS):
+        if _has(ln, GRAND_WORDS) and not _has(ln, NOT_GRAND):
+            grands.append(max(nums))
+        elif _has(ln, SUBTOTAL_WORDS):
             subs.append(max(nums))
         elif _has(ln, VAT_WORDS) and not VAT_NO_RE.search(ln.replace(" ", "")):
             vats.extend(nums)
         elif _has(ln, TOTAL_WORDS):
             totals.append(max(nums))
 
-    total = max(totals) if totals else None
+    total = max(grands) if grands else (max(totals) if totals else None)
     if total is None:
         decimals = [n for ln in lines for n in numbers_in(ln) if n != int(n)]
         total = max(decimals) if decimals else None
@@ -154,10 +222,10 @@ def parse_text(text: str) -> dict:
 
     # اسم المورد: أول سطر فيه حروف كفاية ومش عنوان عام
     skip = ["فاتورة", "invoice", "tax", "ضريبية", "simplified", "مبسطة", "receipt", "إيصال"]
-    for ln in lines[:6]:
+    for ln in name_lines[:6]:
         letters = sum(ch.isalpha() for ch in ln)
         if letters >= 4 and not _has(ln, skip) and letters / max(len(ln), 1) > 0.5:
-            result["vendor_name"] = ln[:80]
+            result["vendor_name"] = ln.strip(" /|-_:.,")[:80]
             break
     return result
 
@@ -171,6 +239,10 @@ def preprocess(image_bytes: bytes):
     if img is None:
         return None
     h, w = img.shape[:2]
+    if max(h, w) > 3200:  # صورة موبايل كبيرة جداً: نصغرها شوية عشان السرعة
+        scale = 3200 / max(h, w)
+        img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        h, w = img.shape[:2]
     if max(h, w) < 1800:
         scale = 1800 / max(h, w)
         img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)

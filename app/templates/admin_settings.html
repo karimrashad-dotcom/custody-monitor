@@ -5,9 +5,11 @@
   <h2 style="margin-top:0">عام</h2>
   <div class="fields">
     <div class="field"><label>اسم الشركة</label><input name="company_name" value="{{ v.company_name }}"></div>
+    <div class="field"><label>الرقم الضريبي للشركة</label><input name="company_vat_number" value="{{ v.company_vat_number }}" dir="ltr" inputmode="numeric"></div>
     <div class="field"><label>الأسبوع بيبدأ يوم</label><select name="week_start_weekday">
       {% for k, d in [('5','السبت'),('6','الأحد'),('0','الاثنين')] %}<option value="{{ k }}" {% if v.week_start_weekday == k %}selected{% endif %}>{{ d }}</option>{% endfor %}</select></div>
   </div>
+  <p class="small muted">اسم الشركة ورقمها الضريبي بيساعدوا البرنامج يفرق بين شركتنا (العميل) والمورد في الفاتورة. اكتب الاسم زي ما بيظهر في الفواتير، عربي وإنجليزي لو الاتنين.</p>
   <h2>القراءة المجانية (Tesseract)</h2>
   {% if ocr.installed and ocr.arabic %}<div class="flash ok">شغالة: البرنامج بيقرا صور الفواتير على الجهاز ده من غير نت ومن غير تكلفة.</div>
   {% elif ocr.installed %}<div class="flash warn">Tesseract متثبت بس من غير اللغة العربية، فهيقرا الأرقام والإنجليزي بس. ضيف ملف ara.traineddata لفولدر tessdata.</div>

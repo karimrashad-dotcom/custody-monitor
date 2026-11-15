@@ -58,15 +58,24 @@ def fix_rtl(text: str, reverse: bool | None = None) -> str:
     return "\n".join(_reverse_line(ln) if ARABIC.search(ln) else ln for ln in text.splitlines())
 
 
+MIN_REAL_TEXT = 40  # أقل من كده يبقى الـ PDF صورة ممسوحة، والنص اللي فيه علامة مائية بس
+
+
 def extract_text(data: bytes, max_pages: int = 3) -> str:
+    """نص الـ PDF. لو ممسوح (CamScanner وغيره) بيرجع فاضي عشان الفاتورة تتقري من الصورة."""
     import pdfplumber
+
+    from .ocr import strip_scanner_marks
 
     with pdfplumber.open(io.BytesIO(data)) as pdf:
         pages = pdf.pages[:max_pages]
         for p in pages:
             _protect(p)
         raw = "\n".join((p.extract_text() or "") for p in pages)
-    return _restore(fix_rtl(raw))
+    text = strip_scanner_marks(_restore(fix_rtl(raw)))
+    if sum(ch.isalnum() for ch in text) < MIN_REAL_TEXT:
+        return ""
+    return text
 
 
 def extract_tables(data: bytes, max_pages: int = 5, by_text: bool = False) -> list[list]:
@@ -89,7 +98,7 @@ def extract_tables(data: bytes, max_pages: int = 5, by_text: bool = False) -> li
     return rows
 
 
-def render_first_page(data: bytes, scale: float = 3.0) -> bytes:
+def render_first_page(data: bytes, scale: float = 4.0) -> bytes:
     """صورة JPEG لأول صفحة: للعرض ولقراءة QR."""
     import pypdfium2 as pdfium
 

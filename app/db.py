@@ -266,15 +266,47 @@ def normalize_vendor_name(name: str) -> str:
     return " ".join((name or "").replace("ـ", "").split()).strip()
 
 
-def find_or_create_vendor(db, name: str, vat_number: str) -> int | None:
+def _junk_vendor_name(name: str, vat_number: str = "") -> bool:
+    from .ocr import is_scanner_mark
+
+    name = (name or "").strip()
+    return not name or name == vat_number or is_scanner_mark(name)
+
+
+def find_or_create_vendor(db, name: str, vat_number: str, invoice_id: int | None = None,
+                          prefer_name: bool = False) -> int | None:
+    """يلاقي المورد أو يعمله.
+    prefer_name: الاسم اللي كتبه الموظف بإيده هو الأساس، حتى لو الرقم الضريبي بتاع مورد تاني.
+    invoice_id: الفاتورة اللي بتتعدل، عشان لو هي الوحيدة على المورد نعدل اسمه بدل ما نعمل مورد جديد."""
     name = normalize_vendor_name(name)
     vat_number = (vat_number or "").strip()
     if not name and not vat_number:
         return None
     if vat_number:
-        row = db.execute("SELECT id FROM vendors WHERE vat_number=?", (vat_number,)).fetchone()
+        row = db.execute("SELECT id, name FROM vendors WHERE vat_number=? ORDER BY id",
+                         (vat_number,)).fetchone()
         if row:
-            return row["id"]
+            same = not name or row["name"].casefold() == name.casefold()
+            if same:
+                return row["id"]
+            if _junk_vendor_name(row["name"], vat_number):
+                # اسم غلط زي CamScanner: نصححه بالاسم الصح
+                db.execute("UPDATE vendors SET name=? WHERE id=?", (name, row["id"]))
+                return row["id"]
+            if not prefer_name:
+                return row["id"]
+            others = db.execute(
+                "SELECT COUNT(*) FROM invoices WHERE vendor_id=? AND id IS NOT ?",
+                (row["id"], invoice_id)).fetchone()[0]
+            by_name = db.execute("SELECT id FROM vendors WHERE name=? COLLATE NOCASE",
+                                 (name,)).fetchone()
+            if by_name:
+                return by_name["id"]
+            if not others:
+                db.execute("UPDATE vendors SET name=? WHERE id=?", (name, row["id"]))
+                return row["id"]
+            # الرقم الضريبي بتاع مورد تاني عليه فواتير: نعمل المورد الجديد من غير الرقم ده
+            vat_number = ""
     if name:
         row = db.execute(
             "SELECT id, vat_number FROM vendors WHERE name=? COLLATE NOCASE", (name,)

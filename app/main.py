@@ -292,13 +292,15 @@ async def upload(request: Request, custody_id: int = Form(...), image: UploadFil
         cats = [c["name"] for c in categories(db)]
         api_key = get_setting(db, "anthropic_api_key")
         model = get_setting(db, "anthropic_model", DEFAULT_MODEL)
+        own = {"name": get_setting(db, "company_name", ""), "vat": get_setting(db, "company_vat_number", "")}
         week = dbm.get_or_open_week(db, custody_id)
         sha = hashlib.sha256(prepared).hexdigest()
         rel = save_image(prepared, "inv")
         db.commit()  # متمسكش قفل القاعدة أثناء القراءة الذكية
 
     ext = extract_invoice(prepared, media_type, api_key=api_key, model=model,
-                          categories=cats, original_bytes=image_bytes, pdf_text=pdf_text)
+                          categories=cats, original_bytes=image_bytes, pdf_text=pdf_text,
+                          own_company=own)
 
     with get_db() as db:
         vendor_id = dbm.find_or_create_vendor(db, ext.vendor_name, ext.vendor_vat_number)
@@ -388,7 +390,8 @@ async def invoice_edit(request: Request, invoice_id: int):
             flash(request, "لازم تكتب إجمالي الفاتورة قبل ما تبعتها", "error")
             return go(f"/invoices/{invoice_id}/edit")
         vendor_id = dbm.find_or_create_vendor(db, form.get("vendor_name", ""),
-                                              form.get("vendor_vat_number", ""))
+                                              form.get("vendor_vat_number", ""),
+                                              invoice_id=invoice_id, prefer_name=True)
         cat_id = form.get("category_id") or None
         week_id = inv["week_id"]
         if inv["week_status"] == "closed" and inv["status"] == "draft":
@@ -1146,7 +1149,7 @@ def admin_alerts_read(request: Request, alert_id: str = Form("")):
         return go("/admin/alerts")
 
 
-SETTING_KEYS = ["company_name", "anthropic_api_key", "anthropic_model", "alert_email",
+SETTING_KEYS = ["company_name", "company_vat_number", "anthropic_api_key", "anthropic_model", "alert_email",
                 "smtp_host", "smtp_port", "smtp_user", "smtp_password", "smtp_from", "smtp_tls",
                 "week_start_weekday"]
 

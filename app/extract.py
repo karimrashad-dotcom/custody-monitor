@@ -263,10 +263,10 @@ def from_claude(image_bytes: bytes, media_type: str, api_key: str, model: str,
         result.notes.append(data["notes"])
 
 
-def from_pdf_text(text: str, result: Extraction) -> None:
+def from_pdf_text(text: str, result: Extraction, own: dict | None = None) -> None:
     from .ocr import parse_text
 
-    data = parse_text(text)
+    data = parse_text(text, own)
     result.raw["pdf"] = {"fields": data, "text": text[:4000]}
     if not data:
         return
@@ -280,13 +280,13 @@ def from_pdf_text(text: str, result: Extraction) -> None:
 
 
 # ---------------- قراءة مجانية (Tesseract) ----------------
-def from_ocr(image_bytes: bytes, result: Extraction) -> None:
+def from_ocr(image_bytes: bytes, result: Extraction, own: dict | None = None) -> None:
     from . import ocr
 
     text = ocr.read_text(image_bytes)
     if not text:
         return
-    data = ocr.parse_text(text)
+    data = ocr.parse_text(text, own)
     result.raw["ocr"] = {"fields": data, "text": text[:4000]}
     if not data:
         return
@@ -315,14 +315,15 @@ def prepare_image(raw: bytes, max_side: int = 2000) -> tuple[bytes, str]:
 
 def extract_invoice(image_bytes: bytes, media_type: str, api_key: str = "",
                     model: str = DEFAULT_MODEL, categories: list[str] | None = None,
-                    original_bytes: bytes | None = None, pdf_text: str = "") -> Extraction:
+                    original_bytes: bytes | None = None, pdf_text: str = "",
+                    own_company: dict | None = None) -> Extraction:
     result = Extraction()
     # QR بيتقري أحسن من الصورة الأصلية قبل التصغير
     from_qr(original_bytes or image_bytes, result)
     if not result.sources and original_bytes:
         from_qr(image_bytes, result)
     if pdf_text.strip():
-        from_pdf_text(pdf_text, result)
+        from_pdf_text(pdf_text, result, own_company)
     needs_ai = not result.invoice_number or result.total is None or not result.items
     if "pdf" in result.sources and result.total is not None and not api_key:
         needs_ai = False  # نص الـ PDF أدق من قراءة الصورة
@@ -330,7 +331,10 @@ def extract_invoice(image_bytes: bytes, media_type: str, api_key: str = "",
         from_claude(image_bytes, media_type, api_key, model or DEFAULT_MODEL,
                     categories or [], result)
     elif needs_ai:
-        from_ocr(image_bytes, result)
+        # القراءة المجانية أدق بكتير على الصورة بحجمها الكامل مش النسخة المتصغرة
+        from_ocr(original_bytes or image_bytes, result, own_company)
+        if "ocr" not in result.sources and original_bytes:
+            from_ocr(image_bytes, result, own_company)
     if result.subtotal is None and result.total is not None and result.vat_amount is not None:
         result.subtotal = round(result.total - result.vat_amount, 2)
     if not result.sources and not api_key:
