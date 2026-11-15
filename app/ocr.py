@@ -175,7 +175,10 @@ def parse_text(text: str, own: dict | None = None) -> dict:
         name_lines = lines[:start] + lines[end + 1:]
         name_lines = [ln for ln in name_lines if not _is_own_line(ln, own_words)]
 
-    vats = [v for v in VAT_NO_RE.findall(text.replace(" ", "")) if v != own_vat]
+    def _is_own_vat(v: str) -> bool:  # رقمنا ممكن يتقري بكام رقم غلط
+        return bool(own_vat) and len(v) == len(own_vat) and sum(a != b for a, b in zip(v, own_vat)) <= 4
+
+    vats = [v for v in VAT_NO_RE.findall(text.replace(" ", "")) if not _is_own_vat(v)]
     if vats:
         result["vendor_vat_number"] = vats[0]
 

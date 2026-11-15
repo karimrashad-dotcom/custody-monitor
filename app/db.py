@@ -273,6 +273,13 @@ def _junk_vendor_name(name: str, vat_number: str = "") -> bool:
     return not name or name == vat_number or is_scanner_mark(name)
 
 
+def _similar_names(a: str, b: str) -> bool:
+    """فيه كلمة مميزة مشتركة بين الاسمين (مش شركة/مؤسسة)."""
+    from .ocr import _name_words
+
+    return bool(_name_words(a) & _name_words(b))
+
+
 def find_or_create_vendor(db, name: str, vat_number: str, invoice_id: int | None = None,
                           prefer_name: bool = False) -> int | None:
     """يلاقي المورد أو يعمله.
@@ -289,15 +296,16 @@ def find_or_create_vendor(db, name: str, vat_number: str, invoice_id: int | None
             same = not name or row["name"].casefold() == name.casefold()
             if same:
                 return row["id"]
-            if _junk_vendor_name(row["name"], vat_number):
-                # اسم غلط زي CamScanner: نصححه بالاسم الصح
-                db.execute("UPDATE vendors SET name=? WHERE id=?", (name, row["id"]))
-                return row["id"]
-            if not prefer_name:
-                return row["id"]
             others = db.execute(
                 "SELECT COUNT(*) FROM invoices WHERE vendor_id=? AND id IS NOT ?",
                 (row["id"], invoice_id)).fetchone()[0]
+            if _junk_vendor_name(row["name"], vat_number) and not others:
+                # اسم غلط زي CamScanner ومفيش فواتير تانية عليه: نصححه بالاسم الصح
+                db.execute("UPDATE vendors SET name=? WHERE id=?", (name, row["id"]))
+                return row["id"]
+            if not prefer_name and _similar_names(row["name"], name):
+                return row["id"]  # نفس المورد واسمه اتقري بشكل مختلف شوية
+            # الاسم مختلف خالص: الرقم الضريبي غالباً اتقري غلط أو متسجل على مورد غلط، فالاسم هو الأساس
             by_name = db.execute("SELECT id FROM vendors WHERE name=? COLLATE NOCASE",
                                  (name,)).fetchone()
             if by_name:

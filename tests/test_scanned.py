@@ -60,4 +60,15 @@ def test_vendor_rename_sticks():
         other = dbm.find_or_create_vendor(db, "مطبعة الذهبية", vat, invoice_id=-1, prefer_name=True)
         assert other != junk
         assert db.execute("SELECT name FROM vendors WHERE id=?", (other,)).fetchone()[0] == "مطبعة الذهبية"
+        # وقت الرفع: رقم ضريبي متسجل على مورد اسمه مختلف خالص ميخليش الفاتورة تتربط بيه
+        upload = dbm.find_or_create_vendor(db, "شركة نجوم الليزر", vat)
+        assert upload not in (junk, other)
+        # واسم قريب (قراءة مختلفة شوية) بيتربط بنفس المورد
+        assert dbm.find_or_create_vendor(db, "CNTXT Company", vat) == junk
         db.rollback()
+
+
+def test_own_vat_misread_is_ignored():
+    text = "مورد الاختبار\nVAT 300738463950603\nالإجمالي 60.00"
+    data = ocr.parse_text(text, {"name": "", "vat": "300732463960603"})
+    assert "vendor_vat_number" not in data
