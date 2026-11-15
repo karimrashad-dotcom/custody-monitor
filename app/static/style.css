@@ -33,8 +33,7 @@
   --side-w: 252px;
   color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
+:root[data-theme="dark"] {
     --bg: #0a101c; --bg-grad: linear-gradient(180deg, #0b1322 0%, #0a101c 320px);
     --surface: #152034; --surface-2: #1a2740; --text: #e6ecf5; --muted: #9daac0; --faint: #74829a;
     --border: #24324b; --border-strong: #31415e; --primary: #3cc7ad; --primary-ink: #6fdcc6; --primary-soft: #133a37;
@@ -43,7 +42,6 @@
     --danger: #f2796a; --danger-soft: #3c1d1a; --warn: #e8b24c; --warn-soft: #3a2e15; --ok: #5fcf92; --ok-soft: #14301f;
     --shadow: 0 1px 2px rgba(0,0,0,.35), 0 4px 14px rgba(0,0,0,.2); --shadow-lg: 0 12px 34px rgba(0,0,0,.55);
     color-scheme: dark;
-  }
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
@@ -312,3 +310,6 @@ label.check input { width: 18px; height: 18px; accent-color: var(--primary); }
 .ri-issues { display: flex; gap: 6px; flex-wrap: wrap; }
 .ri-issues span { background: var(--danger-soft); color: var(--danger); font-size: 12.5px; padding: 2px 9px; border-radius: 20px; }
 @media (max-width: 640px) { .review-list { grid-template-columns: 1fr; } .ri-stats { grid-template-columns: 1fr 1fr; } .filters .field[style] { grid-column: 1 / -1 !important; } }
+
+.theme-btn { background: none; border: 0; color: var(--side-text); padding: 8px; border-radius: 9px; cursor: pointer; display: flex; }
+.theme-btn:hover { background: rgba(255,255,255,.06); }

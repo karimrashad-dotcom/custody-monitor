@@ -16,7 +16,8 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap">
   <link rel="icon" href="/static/icon.png">
   <link rel="apple-touch-icon" href="/static/icon.png">
-  <link rel="stylesheet" href="/static/style.css?v=4">
+  <link rel="stylesheet" href="/static/style.css?v=5">
+  <script>try { if (localStorage.getItem('theme') === 'dark') document.documentElement.dataset.theme = 'dark'; } catch (e) {}</script>
 </head>
 <body class="{{ 'has-nav' if user else 'no-nav' }} {{ 'is-admin' if user and user.role == 'admin' else 'is-emp' }}">
 {% if user %}
@@ -50,6 +51,8 @@
   </nav>
   <div class="side-foot">
     <a href="/account" class="me">{{ icon('user', 18) }}<span>{{ user.full_name }}</span></a>
+    <button class="theme-btn" type="button" title="فاتح / غامق" aria-label="تبديل الوضع الفاتح والغامق"
+      onclick="var d=document.documentElement;var on=d.dataset.theme!=='dark';if(on){d.dataset.theme='dark'}else{delete d.dataset.theme}try{localStorage.setItem('theme',on?'dark':'light')}catch(e){}">{{ icon('moon', 18) }}</button>
     <a href="/logout" class="out" title="خروج">{{ icon('logout', 18) }}</a>
   </div>
 </aside>
