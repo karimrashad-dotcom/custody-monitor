@@ -35,7 +35,8 @@ templates = Jinja2Templates(directory=APP_DIR / "templates")
 
 STATUS_LABELS = {"draft": "مسودة", "pending": "بانتظار المراجعة",
                  "approved": "معتمدة", "rejected": "مرفوضة"}
-SOURCE_LABELS = {"qr": "QR", "ai": "قراءة ذكية", "manual": "يدوي", "qr+ai": "QR + قراءة ذكية"}
+SOURCE_LABELS = {"qr": "QR", "ai": "قراءة ذكية", "manual": "يدوي", "qr+ai": "QR + قراءة ذكية",
+                 "ocr": "قراءة مجانية", "qr+ocr": "QR + قراءة مجانية"}
 
 
 def money(value) -> str:
@@ -670,7 +671,8 @@ def admin_dashboard(request: Request):
                       open_spent=open_spent, open_amount=open_amount, pending=pending,
                       over_limit=over_limit, alerts=alerts, by_cat=by_cat,
                       month_total=sum(r["total"] or 0 for r in by_cat),
-                      ai_enabled=bool(get_setting(db, "anthropic_api_key")))
+                      ai_enabled=bool(get_setting(db, "anthropic_api_key")),
+                      ocr_ok=__import__("app.ocr", fromlist=["status"]).status()["installed"])
 
 
 @app.get("/admin/invoices")
@@ -987,8 +989,9 @@ def admin_settings(request: Request):
         values["anthropic_model"] = values["anthropic_model"] or DEFAULT_MODEL
         values["week_start_weekday"] = values["week_start_weekday"] or "6"
         values["smtp_tls"] = values["smtp_tls"] or "1"
+        from .ocr import status as ocr_status
         return render(request, db, "admin_settings.html", user=admin, v=values,
-                      categories=categories(db))
+                      categories=categories(db), ocr=ocr_status())
 
 
 @app.post("/admin/settings")

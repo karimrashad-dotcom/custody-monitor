@@ -2,7 +2,7 @@
 {% from "_macros.html" import balance %}
 {% block content %}
 <h1>لوحة المدير</h1>
-{% if not ai_enabled %}<div class="flash warn">القراءة الذكية للفواتير مش مفعلة، فالبرنامج بيقرا QR بس. حط مفتاح Claude API من <a href="/admin/settings">الإعدادات</a>.</div>{% endif %}
+{% if not ai_enabled and not ocr_ok %}<div class="flash warn">قراءة صور الفواتير مش شغالة: البرنامج بيقرا QR بس. ثبّت Tesseract (مجاني) أو حط مفتاح Claude API، التفاصيل في <a href="/admin/settings">الإعدادات</a>.</div>{% endif %}
 <div class="grid">
   <a class="card stat" href="/admin/invoices?status=pending"><div class="label">مستنية مراجعة</div><div class="value num">{{ pending }}</div><div class="sub">{{ over_limit }} منها فوق الحد</div></a>
   <a class="card stat" href="/admin/alerts"><div class="label">تنبيهات جديدة</div><div class="value num">{{ unread_alerts }}</div></a>

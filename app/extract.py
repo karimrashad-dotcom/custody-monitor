@@ -263,6 +263,26 @@ def from_claude(image_bytes: bytes, media_type: str, api_key: str, model: str,
         result.notes.append(data["notes"])
 
 
+# ---------------- قراءة مجانية (Tesseract) ----------------
+def from_ocr(image_bytes: bytes, result: Extraction) -> None:
+    from . import ocr
+
+    text = ocr.read_text(image_bytes)
+    if not text:
+        return
+    data = ocr.parse_text(text)
+    result.raw["ocr"] = {"fields": data, "text": text[:4000]}
+    if not data:
+        return
+    result.sources.append("ocr")
+    for key in ("invoice_number", "vendor_name", "vendor_vat_number", "invoice_date"):
+        if not getattr(result, key) and data.get(key):
+            setattr(result, key, data[key])
+    for key in ("subtotal", "vat_amount", "total"):
+        if getattr(result, key) is None and data.get(key) is not None:
+            setattr(result, key, data[key])
+
+
 def prepare_image(raw: bytes, max_side: int = 2000) -> tuple[bytes, str]:
     """يعدل اتجاه الصورة ويصغرها ويحولها JPEG عشان المساحة والقراءة."""
     from PIL import Image, ImageOps
@@ -289,8 +309,12 @@ def extract_invoice(image_bytes: bytes, media_type: str, api_key: str = "",
     if api_key and needs_ai:
         from_claude(image_bytes, media_type, api_key, model or DEFAULT_MODEL,
                     categories or [], result)
+    elif needs_ai:
+        from_ocr(image_bytes, result)
     if result.subtotal is None and result.total is not None and result.vat_amount is not None:
         result.subtotal = round(result.total - result.vat_amount, 2)
     if not result.sources and not api_key:
-        result.notes.append("مفيش QR واضح، والقراءة الذكية مش مفعلة، اكتب البيانات يدوياً")
+        result.notes.append("مقدرتش أقرا الفاتورة كويس، اكتب البيانات يدوياً")
+    elif result.sources == ["ocr"] or result.sources == ["qr", "ocr"]:
+        result.notes.append("القراءة المجانية تقريبية، راجع الأرقام كويس قبل الإرسال")
     return result
