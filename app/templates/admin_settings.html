@@ -10,6 +10,15 @@
       {% for k, d in [('5','السبت'),('6','الأحد'),('0','الاثنين')] %}<option value="{{ k }}" {% if v.week_start_weekday == k %}selected{% endif %}>{{ d }}</option>{% endfor %}</select></div>
   </div>
   <p class="small muted">اسم الشركة ورقمها الضريبي بيساعدوا البرنامج يفرق بين شركتنا (العميل) والمورد في الفاتورة. اكتب الاسم زي ما بيظهر في الفواتير، عربي وإنجليزي لو الاتنين.</p>
+  <h2>الكلمات المفتاحية لقراءة الفاتورة</h2>
+  <p class="small muted">البرنامج بيدور على الكلمات دي في الفاتورة وياخد الرقم اللي جنبها. الكلمات الموجودة مكتوبة تحت كل خانة، ولو فواتيركم بتستخدم كلمة تانية ضيفها هنا (افصل بين الكلمات بفاصلة).</p>
+  <div class="fields">
+    {% for key, label in [('vendor','اسم المورد (السطر اللي فيه الكلمة)'),('invoice_no','رقم الفاتورة'),('subtotal','المبلغ قبل الضريبة'),('vat','مبلغ الضريبة'),('total','الإجمالي شامل الضريبة')] %}
+    <div class="field"><label>{{ label }}</label>
+      <input name="kw_{{ key }}" value="{{ v['kw_' ~ key] }}" placeholder="كلمات إضافية">
+      <div class="small muted">موجود: {{ kw_defaults[key] | join('، ') }}</div></div>
+    {% endfor %}
+  </div>
   <h2>القراءة المجانية (Tesseract)</h2>
   {% if ocr.installed and ocr.arabic %}<div class="flash ok">شغالة: البرنامج بيقرا صور الفواتير على الجهاز ده من غير نت ومن غير تكلفة.</div>
   {% elif ocr.installed %}<div class="flash warn">Tesseract متثبت بس من غير اللغة العربية، فهيقرا الأرقام والإنجليزي بس. ضيف ملف ara.traineddata لفولدر tessdata.</div>

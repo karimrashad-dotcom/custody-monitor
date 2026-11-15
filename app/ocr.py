@@ -143,9 +143,17 @@ VENDOR_KEYWORDS = ["شركة", "شركه", "مؤسسة", "مؤسسه", "مطبع
                    "establishment", "trading", "llc", "ltd", "limited", "factory", "agency"]
 
 
-def _vendor_keyword(line: str) -> bool:
+def _vendor_keyword(line: str, extra: list[str] | None = None) -> bool:
     words = re.findall(r"[^\W\d_]+\.?", line.casefold())
-    return any(w in VENDOR_KEYWORDS or w.rstrip(".") in VENDOR_KEYWORDS for w in words)
+    if any(w in VENDOR_KEYWORDS or w.rstrip(".") in VENDOR_KEYWORDS for w in words):
+        return True
+    low = line.casefold()
+    return any(k in low for k in (extra or []))
+
+
+def split_keywords(value: str) -> list[str]:
+    """كلمات الإعدادات: مفصولة بفاصلة أو سطر جديد."""
+    return [w.strip().casefold() for w in re.split(r"[,،\n]", value or "") if w.strip()]
 
 
 def _is_own_line(line: str, own_words: set[str], loose: bool = False) -> bool:
@@ -160,6 +168,11 @@ def _is_own_line(line: str, own_words: set[str], loose: bool = False) -> bool:
 def parse_text(text: str, own: dict | None = None) -> dict:
     """own: بيانات شركتنا (name, vat) عشان منخدهاش على إنها المورد، لأن الفاتورة فيها بيانات العميل كمان."""
     own = own or {}
+    kw = own.get("keywords") or {}
+    total_words = TOTAL_WORDS + kw.get("total", [])
+    grand_words = GRAND_WORDS + kw.get("total", [])
+    vat_words = VAT_WORDS + kw.get("vat", [])
+    sub_words = SUBTOTAL_WORDS + kw.get("subtotal", [])
     own_vat = re.sub(r"\D", "", own.get("vat") or "")
     own_words = _name_words(own.get("name") or "")
     text = strip_scanner_marks(normalize(text))
@@ -195,7 +208,13 @@ def parse_text(text: str, own: dict | None = None) -> dict:
 
     result["invoice_date"] = find_date(text)
 
-    m = INVOICE_NO_RE.search(text)
+    m = None
+    for word in kw.get("invoice_no", []):  # كلمات المستخدم الأول
+        m = re.search(re.escape(word) + r"\s*[:#.\-]*\s*([A-Za-z0-9][A-Za-z0-9\-/]{0,24})", text, re.IGNORECASE)
+        if m and any(ch.isdigit() for ch in m.group(1)):
+            break
+        m = None
+    m = m or INVOICE_NO_RE.search(text)
     if m and not VAT_NO_RE.fullmatch(m.group(1)) and any(ch.isdigit() for ch in m.group(1)):
         result["invoice_number"] = m.group(1)
     else:
@@ -208,13 +227,13 @@ def parse_text(text: str, own: dict | None = None) -> dict:
         nums = [n for n in numbers_in(ln) if n not in (15.0, 15)]
         if not nums:
             continue
-        if _has(ln, GRAND_WORDS) and not _has(ln, NOT_GRAND):
+        if _has(ln, grand_words) and not _has(ln, NOT_GRAND):
             grands.append(max(nums))
-        elif _has(ln, SUBTOTAL_WORDS):
+        elif _has(ln, sub_words):
             subs.append(max(nums))
-        elif _has(ln, VAT_WORDS) and not VAT_NO_RE.search(ln.replace(" ", "")):
+        elif _has(ln, vat_words) and not VAT_NO_RE.search(ln.replace(" ", "")):
             vats.extend(nums)
-        elif _has(ln, TOTAL_WORDS):
+        elif _has(ln, total_words):
             totals.append(max(nums))
 
     total = max(grands) if grands else (max(totals) if totals else None)
@@ -242,7 +261,7 @@ def parse_text(text: str, own: dict | None = None) -> dict:
 
     # الأول: سطر فيه كلمة زي (شركة، مؤسسة، Company) ومش اسم شركتنا. المورد بيبقى فوق والعميل تحت
     for ln in name_lines[:15]:
-        if ok(ln) and _vendor_keyword(ln) and not _is_own_line(ln, own_words, loose=True):
+        if ok(ln) and _vendor_keyword(ln, kw.get("vendor")) and not _is_own_line(ln, own_words, loose=True):
             result["vendor_name"] = ln.strip(" /|-_:.,")[:80]
             return result
     for ln in name_lines[:6]:

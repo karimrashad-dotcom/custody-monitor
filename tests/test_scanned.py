@@ -72,3 +72,11 @@ def test_own_vat_misread_is_ignored():
     text = "مورد الاختبار\nVAT 300738463950603\nالإجمالي 60.00"
     data = ocr.parse_text(text, {"name": "", "vat": "300732463960603"})
     assert "vendor_vat_number" not in data
+
+
+def test_user_keywords():
+    text = "محل الأمانة\nSerial: A-7781\nالصافي المطلوب دفعه 99.50\nقيمة الضريبة 12.98\nالمبلغ النهائي 112.48"
+    kw = {"invoice_no": ["serial"], "total": ["المبلغ النهائي"]}
+    data = ocr.parse_text(text, {"keywords": kw})
+    assert data["invoice_number"] == "A-7781"
+    assert data["total"] == 112.48

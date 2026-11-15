@@ -292,7 +292,10 @@ async def upload(request: Request, custody_id: int = Form(...), image: UploadFil
         cats = [c["name"] for c in categories(db)]
         api_key = get_setting(db, "anthropic_api_key")
         model = get_setting(db, "anthropic_model", DEFAULT_MODEL)
-        own = {"name": get_setting(db, "company_name", ""), "vat": get_setting(db, "company_vat_number", "")}
+        from .ocr import split_keywords
+        own = {"name": get_setting(db, "company_name", ""), "vat": get_setting(db, "company_vat_number", ""),
+               "keywords": {k: split_keywords(get_setting(db, f"kw_{k}", ""))
+                            for k in ("vendor", "invoice_no", "subtotal", "vat", "total")}}
         week = dbm.get_or_open_week(db, custody_id)
         sha = hashlib.sha256(prepared).hexdigest()
         rel = save_image(prepared, "inv")
@@ -1149,7 +1152,8 @@ def admin_alerts_read(request: Request, alert_id: str = Form("")):
         return go("/admin/alerts")
 
 
-SETTING_KEYS = ["company_name", "company_vat_number", "anthropic_api_key", "anthropic_model", "alert_email",
+SETTING_KEYS = ["company_name", "company_vat_number", "kw_vendor", "kw_invoice_no", "kw_subtotal",
+                "kw_vat", "kw_total", "anthropic_api_key", "anthropic_model", "alert_email",
                 "smtp_host", "smtp_port", "smtp_user", "smtp_password", "smtp_from", "smtp_tls",
                 "week_start_weekday"]
 
@@ -1163,7 +1167,11 @@ def admin_settings(request: Request):
         values["week_start_weekday"] = values["week_start_weekday"] or "6"
         values["smtp_tls"] = values["smtp_tls"] or "1"
         from .ocr import status as ocr_status
-        return render(request, db, "admin_settings.html", user=admin, v=values,
+        from . import ocr as ocr_mod
+        defaults = {"vendor": ocr_mod.VENDOR_KEYWORDS, "invoice_no": ["رقم الفاتورة", "فاتورة رقم", "Invoice No", "INV"],
+                    "subtotal": ocr_mod.SUBTOTAL_WORDS, "vat": ocr_mod.VAT_WORDS,
+                    "total": ocr_mod.GRAND_WORDS + ocr_mod.TOTAL_WORDS}
+        return render(request, db, "admin_settings.html", user=admin, v=values, kw_defaults=defaults,
                       categories=categories(db), ocr=ocr_status())
 
 
