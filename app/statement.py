@@ -10,11 +10,14 @@ from .ocr import find_date, normalize, numbers_in
 
 TOLERANCE = 0.5  # فرق التقريب المسموح بالريال
 
-DESC_HEADERS = ["البيان", "الوصف", "التفاصيل", "بيان", "وصف", "description", "details", "item", "الصنف"]
-AMOUNT_HEADERS = ["المبلغ", "القيمة", "مبلغ", "قيمة", "amount", "value", "total", "الإجمالي", "الاجمالي"]
+DESC_HEADERS = ["بيان", "البيان", "الوصف", "وصف", "التفاصيل", "description", "details", "item", "الصنف"]
+TOTAL_HEADERS = ["اجمال", "إجمال", "الإجمالي", "المجموع", "total", "gross"]
+SUBTOTAL_HEADERS = ["قيمة المبلغ", "المبلغ", "قبل الضريبة", "صافي", "مبلغ", "amount", "net", "القيمة", "قيمة"]
+VAT_HEADERS = ["ضريبة", "الضريبة", "vat", "tax"]
 DATE_HEADERS = ["التاريخ", "تاريخ", "date"]
+COST_HEADERS = ["مركز التكلفة", "مركز تكلفة", "cost center", "cost centre"]
 VENDOR_HEADERS = ["المورد", "الجهة", "اسم المحل", "vendor", "supplier"]
-INVOICE_HEADERS = ["رقم الفاتورة", "فاتورة", "invoice"]
+SKIP_WORDS = ["الإجمالي", "الاجمالي", "اجماليات", "الاجماليات", "المجموع", "total"]
 
 
 # ---------------- قراءة الملفات ----------------
@@ -33,28 +36,62 @@ def _to_amount(v) -> float | None:
     return round(nums[-1], 2) if nums else None
 
 
-def _find_col(header: list[str], words: list[str]) -> int | None:
-    for i, h in enumerate(header):
-        low = h.lower()
-        if any(w in low for w in words):
-            return i
-    return None
+def _find_cols(header: list[str], words: list[str], taken: set[int]) -> list[int]:
+    return [i for i, h in enumerate(header) if i not in taken and h and any(w in h.lower() for w in words)]
+
+
+def _map_header(header: list[str]) -> dict | None:
+    """يحدد الأعمدة من صف العناوين. الترتيب مهم: (اجمالي القيمة) قبل (القيمة)."""
+    taken: set[int] = set()
+    cols: dict = {}
+    for key, words in (("total", TOTAL_HEADERS), ("vat", VAT_HEADERS), ("date", DATE_HEADERS),
+                       ("cost", COST_HEADERS), ("vendor", VENDOR_HEADERS)):
+        found = _find_cols(header, words, taken)
+        cols[key] = found[0] if found else None
+        taken.update(found[:1])
+    found = _find_cols(header, SUBTOTAL_HEADERS, taken)
+    cols["subtotal"] = found[0] if found else None
+    taken.update(found[:1])
+    cols["desc"] = _find_cols(header, DESC_HEADERS, taken)  # ممكن أكتر من عمود: بيان 1 + بيان 2
+    if not cols["desc"] or (cols["total"] is None and cols["subtotal"] is None):
+        return None
+    return cols
+
+
+def _date_order(raw_dates: list[str]) -> str:
+    """التواريخ زي 7/13/2026 معناها شهر/يوم. بنشوف الملف كله ونقرر."""
+    for d in raw_dates:
+        m = re.match(r"\s*(\d{1,2})[/.\-](\d{1,2})[/.\-](20\d{2})", d)
+        if m:
+            a, b = int(m.group(1)), int(m.group(2))
+            if a > 12:
+                return "dmy"
+            if b > 12:
+                return "mdy"
+    return "dmy"
+
+
+def _parse_date(raw: str, order: str) -> str:
+    raw = normalize(raw or "")
+    m = re.match(r"\s*(\d{1,2})[/.\-](\d{1,2})[/.\-](20\d{2})", raw)
+    if m:
+        a, b, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        d, mo = (a, b) if order == "dmy" else (b, a)
+        try:
+            return date(y, mo, d).isoformat()
+        except ValueError:
+            return ""
+    return find_date(raw)
 
 
 def parse_rows(rows: list[list]) -> list[dict]:
-    """صفوف جدول (من Excel أو CSV) → سطور بيان. بيدور على صف العناوين الأول."""
+    """صفوف جدول (Excel أو CSV أو جدول PDF) → سطور بيان. بيدور على صف العناوين الأول."""
     rows = [r for r in rows if any(_cell_text(c) for c in r)]
-    header_idx, cols = None, {}
-    for idx, row in enumerate(rows[:15]):
-        header = [_cell_text(c) for c in row]
-        amount_col = _find_col(header, AMOUNT_HEADERS)
-        desc_col = _find_col(header, DESC_HEADERS)
-        if amount_col is not None and desc_col is not None and amount_col != desc_col:
+    header_idx, cols = None, None
+    for idx, row in enumerate(rows[:20]):
+        cols = _map_header([_cell_text(c) for c in row])
+        if cols:
             header_idx = idx
-            cols = {"amount": amount_col, "desc": desc_col,
-                    "date": _find_col(header, DATE_HEADERS),
-                    "vendor": _find_col(header, VENDOR_HEADERS),
-                    "invoice": _find_col(header, INVOICE_HEADERS)}
             break
     lines = []
     if header_idx is None:
@@ -63,22 +100,37 @@ def parse_rows(rows: list[list]) -> list[dict]:
             texts = [_cell_text(c) for c in row]
             amounts = [a for a in (_to_amount(c) for c in row if isinstance(c, (int, float)) or numbers_in(_cell_text(c))) if a]
             words = [t for t in texts if sum(ch.isalpha() for ch in t) >= 3]
-            if amounts and words:
+            if amounts and words and not any(w in " ".join(words) for w in SKIP_WORDS):
                 lines.append({"description": max(words, key=len), "amount": amounts[-1],
+                              "subtotal": None, "vat": None, "cost_center": "",
                               "line_date": find_date(" ".join(texts))})
         return lines
-    for row in rows[header_idx + 1:]:
-        get = lambda key: row[cols[key]] if cols.get(key) is not None and cols[key] < len(row) else None  # noqa: E731
-        amount = _to_amount(get("amount"))
-        desc = _cell_text(get("desc"))
-        if not amount or amount <= 0:
+
+    def get(row, key):
+        i = cols.get(key)
+        return row[i] if i is not None and i < len(row) else None
+
+    body = rows[header_idx + 1:]
+    order = _date_order([_cell_text(get(r, "date")) for r in body if get(r, "date") is not None])
+    for row in body:
+        total = _to_amount(get(row, "total"))
+        subtotal = _to_amount(get(row, "subtotal"))
+        vat = _to_amount(get(row, "vat"))
+        if total is None and subtotal is not None:
+            total = round(subtotal + (vat or 0), 2)
+        desc = " - ".join(t for t in (_cell_text(row[i]) for i in cols["desc"] if i < len(row)) if t)
+        if not total or total <= 0:
             continue
-        low = desc.lower()
-        if any(w in low for w in ["الإجمالي", "الاجمالي", "المجموع", "total"]):
+        if any(w in desc.lower() for w in SKIP_WORDS):
             continue  # صف المجموع في آخر البيان
-        extra = [x for x in (_cell_text(get("vendor")), _cell_text(get("invoice"))) if x]
-        lines.append({"description": desc or " - ".join(extra) or "بدون وصف", "amount": amount,
-                      "line_date": find_date(_cell_text(get("date"))) if get("date") is not None else ""})
+        raw_date = get(row, "date")
+        line_date = raw_date.date().isoformat() if isinstance(raw_date, datetime) else \
+            raw_date.isoformat() if isinstance(raw_date, date) else _parse_date(_cell_text(raw_date), order)
+        lines.append({
+            "description": desc or _cell_text(get(row, "vendor")) or "بدون وصف",
+            "amount": total, "subtotal": subtotal, "vat": vat,
+            "cost_center": _cell_text(get(row, "cost")), "line_date": line_date,
+        })
     return lines
 
 
@@ -99,6 +151,20 @@ def parse_csv(data: bytes) -> list[dict]:
     return parse_rows(list(csv.reader(io.StringIO(text))))
 
 
+def parse_pdf(data: bytes) -> list[dict]:
+    """PDF محفوظ من Excel: بنقرا الجدول من النص اللي جوه الملف. لو PDF ممسوح (صورة) بيرجع فاضي."""
+    from .pdftext import extract_tables, extract_text
+
+    lines = parse_rows(extract_tables(data))
+    if lines:
+        return lines
+    lines = parse_rows(extract_tables(data, by_text=True))  # جدول من غير خطوط
+    if lines:
+        return lines
+    text = extract_text(data)
+    return parse_ocr_text(text) if text.strip() else []
+
+
 def parse_ocr_text(text: str) -> list[dict]:
     """سطور صورة البيان: كل سطر فيه مبلغ + كلام = سطر بيان (تقريبي، الموظف بيراجع)."""
     lines = []
@@ -116,7 +182,8 @@ def parse_ocr_text(text: str) -> list[dict]:
         line_date = find_date(raw)
         desc = re.sub(r"[\d.,/\-:]+", " ", raw)
         desc = " ".join(desc.split())
-        lines.append({"description": desc, "amount": round(nums[-1], 2), "line_date": line_date})
+        lines.append({"description": desc, "amount": round(nums[-1], 2), "subtotal": None, "vat": None,
+                      "cost_center": "", "line_date": line_date})
     return lines
 
 
@@ -140,8 +207,9 @@ def match_week(db, week_id: int) -> dict:
     ).fetchall()
     matched = ambiguous = 0
     for line in lines:
+        amounts = [a for a in (line["amount"], line["subtotal"]) if a]
         cands = [i for i in invoices if i["id"] not in used
-                 and (_close(i["subtotal"], line["amount"]) or _close(i["total"], line["amount"]))]
+                 and any(_close(i["subtotal"], a) or _close(i["total"], a) for a in amounts)]
         if len(cands) > 1 and line["line_date"]:
             same_day = [i for i in cands if i["invoice_date"] == line["line_date"]]
             if same_day:

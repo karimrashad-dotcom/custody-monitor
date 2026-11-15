@@ -21,10 +21,10 @@
   </div>
   <div class="card">
     <b>2. بيان العهدة</b>
-    <p class="small muted" style="margin:4px 0 10px">ارفع البيان (ملف Excel أدق، أو صورة). كل سطر بيتربط بفاتورة بالمبلغ، والوصف بييجي من البيان.</p>
+    <p class="small muted" style="margin:4px 0 10px">ارفع البيان Excel أو PDF محفوظ من Excel (دول أدق حاجة)، أو صورة. كل سطر بيتربط بفاتورة بالمبلغ، والوصف بييجي من البيان.</p>
     {% if week.status == 'open' %}
     <form method="post" action="/weeks/{{ week.id }}/statement" enctype="multipart/form-data">
-      <input type="file" name="image" accept="image/*,.xlsx,.xlsm,.csv" required>
+      <input type="file" name="image" accept="image/*,application/pdf,.pdf,.xlsx,.xlsm,.csv" required>
       <button class="btn primary" style="margin-top:8px">{{ 'رفع بيان جديد' if rec.lines else 'رفع البيان' }}</button>
     </form>
     {% endif %}

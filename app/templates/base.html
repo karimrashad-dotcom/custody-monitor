@@ -15,6 +15,7 @@
     <nav class="links">
       {% if user.role == 'admin' %}
         <a href="/admin">الرئيسية</a>
+        {% if has_custody %}<a href="/me">عهدتي</a><a href="/upload">رفع فاتورة</a>{% endif %}
         <a href="/admin/invoices">الفواتير</a>
         <a href="/admin/weeks">الأسابيع</a>
         <a href="/admin/vendors">الموردين</a>

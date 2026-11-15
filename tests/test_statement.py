@@ -72,7 +72,61 @@ def test_statement_matching(admin, emp):
 
 
 def test_template_roundtrip(emp):
+    from openpyxl import load_workbook
     r = emp.get("/statement-template.xlsx")
     assert r.status_code == 200
-    lines = statement.parse_excel(r.content)
-    assert len(lines) == 1 and lines[0]["amount"] == 500
+    wb = load_workbook(io.BytesIO(r.content))
+    ws = wb.active
+    ws["C5"], ws["B5"], ws["E5"], ws["G5"] = 500, 75, "تغيير زيت", "2026-11-15"
+    ws["C6"], ws["E6"] = 40, "انتقالات"
+    buf = io.BytesIO(); wb.save(buf)
+    lines = statement.parse_excel(buf.getvalue())
+    assert [(l["description"], l["amount"], l["subtotal"]) for l in lines] == [("تغيير زيت", 575.0, 500.0), ("انتقالات", 40.0, 40.0)]
+
+
+def test_company_format_and_pdf(tmp_path):
+    """نفس شكل نموذج الشركة: بيان 1 فاضي والوصف في بيان 2، والمبلغ قبل وبعد الضريبة في أعمدة منفصلة."""
+    import shutil
+    import subprocess
+    rows = [["اجمالي القيمة", "الضريبة", "قيمة المبلغ", "بيان 1", "بيان 2", "مركز التكلفة", "التاريخ"],
+            [29.95, 3.91, 26.04, None, "شراء باسكت مهملات", None, "7/13/2026"],
+            [172.5, None, 172.5, None, "انتقالات", None, "7/12/2026"],
+            [0, None, None, None, None, None, None],
+            [202.45, 3.91, 198.54, "الاجماليات", None, None, None]]
+    lines = statement.parse_rows(rows)
+    assert [(l["description"], l["amount"], l["subtotal"], l["line_date"]) for l in lines] == [
+        ("شراء باسكت مهملات", 29.95, 26.04, "2026-07-13"), ("انتقالات", 172.5, 172.5, "2026-07-12")]
+    soffice = shutil.which("soffice")
+    if not soffice:
+        return
+    from openpyxl.styles import Border, Side
+    wb = Workbook()
+    ws = wb.active
+    ws.sheet_view.rightToLeft = True
+    thin = Side(style="thin")
+    for r in rows:
+        ws.append(r)
+    for row in ws.iter_rows():
+        for c in row:
+            c.border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    for col, w in zip("ABCDEFG", (12, 9, 11, 9, 28, 11, 11)):
+        ws.column_dimensions[col].width = w
+    ws.page_setup.orientation = "landscape"
+    x = tmp_path / "bayan.xlsx"
+    wb.save(x)
+    subprocess.run([soffice, "--headless", "--convert-to", "pdf", "--outdir", str(tmp_path), str(x)],
+                   check=True, capture_output=True, timeout=120)
+    pdf_lines = statement.parse_pdf((tmp_path / "bayan.pdf").read_bytes())
+    assert [(l["description"], l["amount"], l["subtotal"]) for l in pdf_lines] == [
+        ("شراء باسكت مهملات", 29.95, 26.04), ("انتقالات", 172.5, 172.5)]
+
+
+def test_invoice_pdf_upload(emp):
+    """فاتورة PDF (صورة جوه PDF): بتتحول صورة ويتقري الـ QR."""
+    from PIL import Image
+    from tests.test_app import invoice_image
+    img = Image.open(io.BytesIO(invoice_image(tlv("محطة الوقود", "377777777700003", "2026-11-18T08:00:00Z", "115.00", "15.00"))))
+    buf = io.BytesIO()
+    img.save(buf, "PDF", resolution=150)
+    r = emp.post("/upload", data={"custody_id": "1"}, files={"image": ("inv.pdf", buf.getvalue(), "application/pdf")})
+    assert r.status_code == 200 and "محطة الوقود" in r.text and "115.0" in r.text

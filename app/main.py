@@ -16,7 +16,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import db as dbm
-from . import statement
+from . import pdftext, statement
 from .alerts import KIND_LABELS, create_alert, run_invoice_checks
 from .db import get_db, get_setting, set_setting
 from .extract import DEFAULT_MODEL, extract_invoice, prepare_image
@@ -37,7 +37,8 @@ templates = Jinja2Templates(directory=APP_DIR / "templates")
 STATUS_LABELS = {"draft": "مسودة", "pending": "بانتظار المراجعة",
                  "approved": "معتمدة", "rejected": "مرفوضة"}
 SOURCE_LABELS = {"qr": "QR", "ai": "قراءة ذكية", "manual": "يدوي", "qr+ai": "QR + قراءة ذكية",
-                 "ocr": "قراءة مجانية", "qr+ocr": "QR + قراءة مجانية"}
+                 "ocr": "قراءة مجانية", "qr+ocr": "QR + قراءة مجانية",
+                 "pdf": "نص الـ PDF", "qr+pdf": "QR + نص الـ PDF"}
 
 
 def money(value) -> str:
@@ -93,12 +94,15 @@ def require_admin(request: Request, db):
 def render(request: Request, db, name: str, **ctx):
     user = ctx.pop("user", None) or current_user(request, db)
     unread = 0
+    has_custody = False
     if user and user["role"] == "admin":
         unread = db.execute("SELECT COUNT(*) FROM alerts WHERE is_read=0").fetchone()[0]
+        has_custody = bool(db.execute("SELECT 1 FROM custodies WHERE user_id=? AND active=1",
+                                      (user["id"],)).fetchone())
     messages = request.session.pop("flash", [])
     return templates.TemplateResponse(
         request, name,
-        {"user": user, "unread_alerts": unread, "messages": messages,
+        {"user": user, "unread_alerts": unread, "messages": messages, "has_custody": has_custody,
          "company": get_setting(db, "company_name", ""), **ctx},
     )
 
@@ -269,11 +273,22 @@ async def upload(request: Request, custody_id: int = Form(...), image: UploadFil
                              (custody_id, user["id"])).fetchone()
         if not custody:
             raise HTTPException(404)
+        pdf_text = ""
+        image_bytes = raw
+        if pdftext.is_pdf(raw):
+            try:
+                image_bytes = pdftext.render_first_page(raw)
+                pdf_text = pdftext.extract_text(raw)
+            except Exception:
+                flash(request, "مقدرتش أفتح ملف الـ PDF ده.", "error")
+                return go(f"/upload?custody_id={custody_id}")
         try:
-            prepared, media_type = prepare_image(raw)
+            prepared, media_type = prepare_image(image_bytes)
         except Exception:
-            flash(request, "الملف ده مش صورة. صوّر الفاتورة تاني.", "error")
+            flash(request, "الملف ده مش صورة ولا PDF. صوّر الفاتورة تاني.", "error")
             return go(f"/upload?custody_id={custody_id}")
+        if pdf_text:
+            save_file(raw, "inv", ".pdf")
         cats = [c["name"] for c in categories(db)]
         api_key = get_setting(db, "anthropic_api_key")
         model = get_setting(db, "anthropic_model", DEFAULT_MODEL)
@@ -283,7 +298,7 @@ async def upload(request: Request, custody_id: int = Form(...), image: UploadFil
         db.commit()  # متمسكش قفل القاعدة أثناء القراءة الذكية
 
     ext = extract_invoice(prepared, media_type, api_key=api_key, model=model,
-                          categories=cats, original_bytes=raw)
+                          categories=cats, original_bytes=image_bytes, pdf_text=pdf_text)
 
     with get_db() as db:
         vendor_id = dbm.find_or_create_vendor(db, ext.vendor_name, ext.vendor_vat_number)
@@ -511,6 +526,21 @@ async def week_statement(request: Request, week_id: int, image: UploadFile = Fil
                 return go(f"/weeks/{week_id}")
             rel = save_file(raw, "stmt", ".xlsx")
             db.execute("UPDATE weeks SET statement_file=? WHERE id=?", (rel, week_id))
+        elif pdftext.is_pdf(raw):
+            rel = save_file(raw, "stmt", ".pdf")
+            db.execute("UPDATE weeks SET statement_file=? WHERE id=?", (rel, week_id))
+            try:
+                lines = statement.parse_pdf(raw)
+                if not lines:  # PDF ممسوح: نحوله صورة ونقراه
+                    from .ocr import read_text
+                    img = pdftext.render_first_page(raw)
+                    db.execute("UPDATE weeks SET statement_image=? WHERE id=?",
+                               (save_image(prepare_image(img, max_side=2400)[0], "stmt"), week_id))
+                    text = read_text(img)
+                    lines = statement.parse_ocr_text(text) if text else []
+            except Exception:
+                flash(request, "مقدرتش أفتح ملف الـ PDF ده.", "error")
+                return go(f"/weeks/{week_id}")
         elif name.endswith(".csv"):
             lines = statement.parse_csv(raw)
             rel = save_file(raw, "stmt", ".csv")
@@ -531,8 +561,10 @@ async def week_statement(request: Request, week_id: int, image: UploadFile = Fil
         db.execute("DELETE FROM statement_lines WHERE week_id=?", (week_id,))
         for n, ln in enumerate(lines, start=1):
             db.execute(
-                "INSERT INTO statement_lines(week_id,line_no,line_date,description,amount) VALUES (?,?,?,?,?)",
-                (week_id, n, ln.get("line_date", ""), ln["description"], ln["amount"]),
+                "INSERT INTO statement_lines(week_id,line_no,line_date,description,amount,subtotal,vat,cost_center)"
+                " VALUES (?,?,?,?,?,?,?,?)",
+                (week_id, n, ln.get("line_date", ""), ln["description"], ln["amount"],
+                 ln.get("subtotal"), ln.get("vat"), ln.get("cost_center", "")),
             )
         result = statement.match_week(db, week_id)
         create_alert(db, "statement",
@@ -589,12 +621,16 @@ async def week_reconcile_save(request: Request, week_id: int):
             if not desc.strip() and not amount:
                 continue
             n += 1
+            prev = old.get(int(ids[i])) if i < len(ids) and ids[i].isdigit() else None
+            keep = prev is not None and prev["amount"] == amount
             cur = db.execute(
-                "INSERT INTO statement_lines(week_id,line_no,line_date,description,amount) VALUES (?,?,?,?,?)",
-                (week_id, n, (dates[i] if i < len(dates) else "").strip(), desc.strip(), amount),
+                "INSERT INTO statement_lines(week_id,line_no,line_date,description,amount,subtotal,vat,cost_center)"
+                " VALUES (?,?,?,?,?,?,?,?)",
+                (week_id, n, (dates[i] if i < len(dates) else "").strip(), desc.strip(), amount,
+                 prev["subtotal"] if keep else None, prev["vat"] if keep else None,
+                 prev["cost_center"] if prev else ""),
             )
             choice = links[i] if i < len(links) else ""
-            prev = old.get(int(ids[i])) if i < len(ids) and ids[i].isdigit() else None
             if choice.isdigit() and int(choice) in valid and int(choice) not in used:
                 how = "auto" if prev and prev["invoice_id"] == int(choice) and prev["match_status"] == "auto" else "manual"
                 statement.link(db, cur.lastrowid, int(choice), how)
@@ -713,21 +749,29 @@ def week_export(request: Request, week_id: int):
 
 @app.get("/statement-template.xlsx")
 def statement_template(request: Request):
-    """قالب بيان العهدة الفاضي اللي الموظف بيملاه ويرفعه."""
+    """قالب بيان العهدة بنفس شكل نموذج الشركة: الموظف بيملاه ويرفعه Excel أو PDF."""
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill
     with get_db() as db:
         user = require_user(request, db)
     wb = Workbook()
-    ws = new_sheet(wb, "بيان العهدة")
-    ws.append(["بيان عهدة", user["full_name"]])
+    ws = new_sheet(wb, "عهدة")
+    ws.append(["التاريخ:-", date.today().isoformat()])
+    ws.append(["اسم مسئول العهدة:", user["full_name"]])
     ws.append([])
-    ws.append(["التاريخ", "البيان", "المبلغ", "ملاحظات"])
-    for c in ws[3]:
+    header = ["اجمالي القيمة", "الضريبة", "قيمة المبلغ", "بيان 1", "بيان 2", "مركز التكلفة", "التاريخ"]
+    ws.append(header)
+    for c in ws[4]:
         c.font = Font(bold=True)
         c.fill = PatternFill("solid", fgColor="E3F2EF")
-    ws.append([date.today().isoformat(), "مثال: تغيير زيت سيارة النقل (امسح السطر ده)", 500, ""])
-    for col, width in zip("ABCD", (14, 45, 12, 25)):
+    first, last = 5, 24
+    for r in range(first, last + 1):
+        ws.cell(r, 1, f'=IF(C{r}="","",C{r}+B{r})')
+    ws.cell(last + 1, 1, f"=SUM(A{first}:A{last})")
+    ws.cell(last + 1, 2, f"=SUM(B{first}:B{last})")
+    ws.cell(last + 1, 3, f"=SUM(C{first}:C{last})")
+    ws.cell(last + 1, 4, "الاجماليات").font = Font(bold=True)
+    for col, width in zip("ABCDEFG", (14, 10, 12, 18, 40, 14, 12)):
         ws.column_dimensions[col].width = width
     return xlsx_response(wb, "bayan-template.xlsx")
 
