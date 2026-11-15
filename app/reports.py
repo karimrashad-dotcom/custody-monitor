@@ -18,10 +18,10 @@ FILTER_KEYS = ["date_from", "date_to", "user_id", "custody_id", "category_id", "
                "vendor_id", "status"]
 
 PRESETS = [
-    ("this_month", "الشهر ده"),
-    ("last_month", "الشهر اللي فات"),
+    ("this_month", "هذا الشهر"),
+    ("last_month", "الشهر الماضي"),
     ("last_30", "آخر 30 يوم"),
-    ("this_year", "السنة دي"),
+    ("this_year", "هذه السنة"),
 ]
 
 

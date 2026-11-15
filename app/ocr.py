@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import io
 import re
 import shutil
 from datetime import date
@@ -272,11 +273,86 @@ def parse_text(text: str, own: dict | None = None) -> dict:
 
 
 # ---------------- القراءة ----------------
-def preprocess(image_bytes: bytes):
+def _decode_gray(image_bytes: bytes):
     import cv2
     import numpy as np
 
     img = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_GRAYSCALE)
+    if img is None:  # صيغ مش مدعومة في OpenCV (زي HEIC): نفتحها بـ Pillow
+        try:
+            from PIL import Image, ImageOps
+            from .extract import register_heif
+            register_heif()
+            pil = ImageOps.exif_transpose(Image.open(io.BytesIO(image_bytes))).convert("L")
+            img = np.array(pil)
+        except Exception:
+            return None
+    return img
+
+
+def crop_document(img):
+    """صورة كاميرا: نلاقي ورقة الفاتورة (أكبر شكل رباعي فاتح) ونعدل منظورها."""
+    import cv2
+    import numpy as np
+
+    h, w = img.shape[:2]
+    scale = 1000 / max(h, w)
+    small = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+    blur = cv2.GaussianBlur(small, (5, 5), 0)
+    edges = cv2.dilate(cv2.Canny(blur, 40, 120), np.ones((3, 3), np.uint8))
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    area = small.shape[0] * small.shape[1]
+    for c in sorted(contours, key=cv2.contourArea, reverse=True)[:5]:
+        if cv2.contourArea(c) < area * 0.08:
+            break
+        approx = cv2.approxPolyDP(c, 0.02 * cv2.arcLength(c, True), True)
+        if len(approx) != 4:
+            continue
+        pts = approx.reshape(4, 2).astype("float32") / scale
+        s, d = pts.sum(1), np.diff(pts, axis=1).ravel()
+        tl, br, tr, bl = pts[s.argmin()], pts[s.argmax()], pts[d.argmin()], pts[d.argmax()]
+        width = int(max(np.linalg.norm(br - bl), np.linalg.norm(tr - tl)))
+        height = int(max(np.linalg.norm(tr - br), np.linalg.norm(tl - bl)))
+        if width < 300 or height < 300:
+            continue
+        M = cv2.getPerspectiveTransform(np.float32([tl, tr, br, bl]),
+                                        np.float32([[0, 0], [width, 0], [width, height], [0, height]]))
+        return cv2.warpPerspective(img, M, (width, height))
+    return img
+
+
+def _resize_for_ocr(img):
+    import cv2
+
+    h, w = img.shape[:2]
+    if max(h, w) > 3200:
+        s = 3200 / max(h, w)
+        img = cv2.resize(img, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
+    elif max(h, w) < 1800:
+        s = 1800 / max(h, w)
+        img = cv2.resize(img, None, fx=s, fy=s, interpolation=cv2.INTER_CUBIC)
+    return img
+
+
+def preprocess_photo(image_bytes: bytes):
+    """محاولة تانية لصور الكاميرا: قص الورقة + توحيد الإضاءة + أبيض وأسود بـ Otsu."""
+    import cv2
+
+    img = _decode_gray(image_bytes)
+    if img is None:
+        return None
+    img = _resize_for_ocr(crop_document(img))
+    bg = cv2.medianBlur(img, 51)  # الإضاءة غير المتساوية (ضل الموبايل)
+    img = cv2.divide(img, bg, scale=255)
+    img = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(img)
+    _, img = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return img
+
+
+def preprocess(image_bytes: bytes):
+    import cv2
+
+    img = _decode_gray(image_bytes)
     if img is None:
         return None
     h, w = img.shape[:2]
@@ -292,7 +368,7 @@ def preprocess(image_bytes: bytes):
     return img
 
 
-def read_text(image_bytes: bytes) -> str | None:
+def read_text(image_bytes: bytes, photo: bool = False) -> str | None:
     cmd = find_tesseract()
     if not cmd:
         return None
@@ -302,13 +378,15 @@ def read_text(image_bytes: bytes) -> str | None:
         log.warning("pytesseract مش متثبت")
         return None
     pytesseract.pytesseract.tesseract_cmd = cmd
-    img = preprocess(image_bytes)
+    img = preprocess_photo(image_bytes) if photo else preprocess(image_bytes)
     if img is None:
+        log.warning("تعذر فتح الصورة للقراءة المجانية")
         return None
     try:
         langs = pytesseract.get_languages(config="")
         lang = "ara+eng" if "ara" in langs else "eng"
-        return pytesseract.image_to_string(img, lang=lang, config="--psm 4", timeout=60)
+        return pytesseract.image_to_string(img, lang=lang, config="--psm 6" if photo else "--psm 4",
+                                           timeout=60)
     except Exception:
         log.exception("فشلت قراءة Tesseract")
         return None

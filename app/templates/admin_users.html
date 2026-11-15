@@ -8,12 +8,12 @@
     <div class="field"><label>اسم الدخول (إنجليزي)</label><input name="username" required dir="ltr" autocapitalize="none"></div>
     <div class="field"><label>كلمة السر</label><input name="password" required minlength="6"></div>
     <div class="field"><label>الجوال</label><input name="phone" dir="ltr"></div>
-    <div class="field"><label>الإيميل</label><input name="email" type="email" dir="ltr"></div>
+    <div class="field"><label>البريد الإلكتروني</label><input name="email" type="email" dir="ltr"></div>
     <div class="field"><label>الدور</label><select name="role"><option value="employee">موظف صاحب عهدة</option><option value="admin">مدير</option></select></div>
     <div class="field"><label>مبلغ العهدة الأسبوعي (اختياري)</label><input name="weekly_amount" inputmode="decimal" dir="ltr"></div>
     <div class="field"><label>حد الفاتورة الواحدة (اختياري)</label><input name="per_invoice_limit" inputmode="decimal" dir="ltr"></div>
   </div>
-  <p class="small muted">لو كتبت مبلغ العهدة والحد، العهدة هتتعمل للموظف على طول.</p>
+  <p class="small muted">إذا أدخلت مبلغ العهدة والحد فستُنشأ العهدة للموظف مباشرة.</p>
   <button class="btn primary">إضافة</button>
 </form></details>
 <div class="card table-wrap"><table>
@@ -29,7 +29,7 @@
         <input type="hidden" name="action" value="update">
         <div class="field"><input name="full_name" value="{{ u.full_name }}"></div>
         <div class="field"><input name="phone" value="{{ u.phone }}" placeholder="الجوال" dir="ltr"></div>
-        <div class="field"><input name="email" value="{{ u.email }}" placeholder="الإيميل" dir="ltr"></div>
+        <div class="field"><input name="email" value="{{ u.email }}" placeholder="البريد الإلكتروني" dir="ltr"></div>
         <button class="btn sm">حفظ</button></form>
       <form method="post" action="/admin/users/{{ u.id }}" style="margin-top:6px">
         <input type="hidden" name="action" value="password">

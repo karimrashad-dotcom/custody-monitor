@@ -176,6 +176,9 @@ def init_db() -> None:
         inv_cols = {r["name"] for r in db.execute("PRAGMA table_info(invoices)")}
         if "department_id" not in inv_cols:
             db.execute("ALTER TABLE invoices ADD COLUMN department_id INTEGER REFERENCES departments(id)")
+        if "original_path" not in inv_cols:
+            # ملف الـ PDF الأصلي بكل صفحاته (الصورة المعروضة هي أول صفحة بس)
+            db.execute("ALTER TABLE invoices ADD COLUMN original_path TEXT NOT NULL DEFAULT ''")
         cust_cols = {r["name"] for r in db.execute("PRAGMA table_info(custodies)")}
         if "department_id" not in cust_cols:
             db.execute("ALTER TABLE custodies ADD COLUMN department_id INTEGER REFERENCES departments(id)")

@@ -11,5 +11,5 @@
   <div>{{ a.message }}</div>
   {% if a.invoice_id %}<a class="small" href="/invoices/{{ a.invoice_id }}">عرض الفاتورة{% if a.invoice_status %} ({{ STATUS_LABELS[a.invoice_status] }}){% endif %}</a>{% elif a.week_id %}<a class="small" href="/weeks/{{ a.week_id }}">عرض الأسبوع</a>{% endif %}
 </div>
-{% else %}<div class="card muted">مفيش تنبيهات.</div>{% endfor %}
+{% else %}<div class="card muted">لا توجد تنبيهات.</div>{% endfor %}
 {% endblock %}

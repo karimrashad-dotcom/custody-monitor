@@ -2,9 +2,9 @@
 {% block title %}التصنيفات والأقسام{% endblock %}
 {% block content %}
 <div class="page-head"><h1>التصنيفات والأقسام</h1>
-  <p class="muted">التصنيف = نوع المصروف (وقود، صيانة، ضيافة...). القسم = الجهة اللي اتصرف عليها (التسويق، المبيعات...). الاتنين بيظهروا للموظف وقت الفاتورة وبيستخدموا في التقارير.</p></div>
+  <p class="muted">التصنيف = نوع المصروف (وقود، صيانة، ضيافة...). القسم = الجهة التي صُرف المبلغ لصالحها (التسويق، المبيعات...). يظهر كلاهما للموظف عند إدخال الفاتورة ويُستخدمان في التقارير.</p></div>
 <div class="split">
-{% for table, title, hint in [('categories','التصنيفات','مثلاً: إعلانات، هدايا عملاء'),('departments','الأقسام','مثلاً: التسويق')] %}
+{% for table, title, hint in [('categories','التصنيفات','مثال: إعلانات، هدايا العملاء'),('departments','الأقسام','مثال: التسويق')] %}
   <section class="card">
     <h2 class="card-title">{{ title }} <span class="muted small">({{ lists[table]|selectattr('active')|list|length }} نشط)</span></h2>
     <form class="row" method="post" action="/admin/lists/{{ table }}">
@@ -24,7 +24,7 @@
         {% if not c.used %}<form method="post" action="/admin/lists/{{ table }}"><input type="hidden" name="item_id" value="{{ c.id }}">
           <input type="hidden" name="action" value="delete"><button class="btn sm danger">مسح</button></form>{% endif %}
       </li>
-    {% else %}<li class="muted">لسه مفيش.</li>{% endfor %}
+    {% else %}<li class="muted">لا يوجد شيء بعد.</li>{% endfor %}
     </ul>
   </section>
 {% endfor %}

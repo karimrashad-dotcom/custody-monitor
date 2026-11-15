@@ -52,7 +52,7 @@
   <div class="side-foot">
     <a href="/account" class="me">{{ icon('user', 18) }}<span>{{ user.full_name }}</span></a>
     <a class="theme-btn lang-btn" href="/lang?to={{ 'ar' if lang == 'en' else 'en' }}&next={{ request.url.path }}{% if request.url.query %}%3F{{ request.url.query|urlencode }}{% endif %}" title="{{ 'العربية' if lang == 'en' else 'English' }}">{{ 'ع' if lang == 'en' else 'EN' }}</a>
-    <button class="theme-btn" type="button" title="فاتح / غامق" aria-label="تبديل الوضع الفاتح والغامق"
+    <button class="theme-btn" type="button" title="فاتح / داكن" aria-label="التبديل بين الوضع الفاتح والداكن"
       onclick="var d=document.documentElement;var on=d.dataset.theme!=='dark';if(on){d.dataset.theme='dark'}else{delete d.dataset.theme}try{localStorage.setItem('theme',on?'dark':'light')}catch(e){}">{{ icon('moon', 18) }}</button>
     <a href="/logout" class="out" title="خروج">{{ icon('logout', 18) }}</a>
   </div>

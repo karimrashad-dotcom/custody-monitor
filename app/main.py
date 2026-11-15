@@ -26,6 +26,15 @@ logging.basicConfig(level=logging.INFO)
 APP_DIR = Path(__file__).resolve().parent
 
 dbm.init_db()
+try:  # سجل أخطاء في data/server.log عشان نعرف سبب أي فشل في الرفع أو القراءة
+    from logging.handlers import RotatingFileHandler
+    _fh = RotatingFileHandler(dbm.DATA_DIR / "server.log", maxBytes=2_000_000, backupCount=2, encoding="utf-8")
+    _fh.setLevel(logging.INFO)
+    _fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    logging.getLogger("app").addHandler(_fh)
+except OSError:
+    pass
+log = logging.getLogger("app.main")
 with get_db() as _db:
     SECRET = get_setting(_db, "secret_key")
 
@@ -88,7 +97,7 @@ def require_user(request: Request, db):
 def require_admin(request: Request, db):
     user = require_user(request, db)
     if user["role"] != "admin":
-        raise HTTPException(403, "الصفحة دي لمدير النظام بس")
+        raise HTTPException(403, "هذه الصفحة لمدير النظام فقط")
     return user
 
 
@@ -170,7 +179,7 @@ def setup(request: Request, full_name: str = Form(...), username: str = Form(...
         if db.execute("SELECT COUNT(*) FROM users").fetchone()[0]:
             return go("/login")
         if len(password) < 6:
-            flash(request, "كلمة السر لازم تكون 6 حروف على الأقل", "error")
+            flash(request, "يجب ألا تقل كلمة السر عن 6 أحرف", "error")
             return go("/setup")
         cur = db.execute(
             "INSERT INTO users(username,full_name,role,password_hash) VALUES (?,?,?,?)",
@@ -194,7 +203,7 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
         user = db.execute("SELECT * FROM users WHERE username=? AND active=1",
                           (username.strip().lower(),)).fetchone()
         if not user or not dbm.verify_password(password, user["password_hash"]):
-            flash(request, "اسم الدخول أو كلمة السر غلط", "error")
+            flash(request, "اسم الدخول أو كلمة السر غير صحيحة", "error")
             return go("/login")
         request.session["uid"] = user["id"]
         return go("/")
@@ -218,13 +227,13 @@ def account(request: Request, current: str = Form(...), new: str = Form(...)):
     with get_db() as db:
         user = require_user(request, db)
         if not dbm.verify_password(current, user["password_hash"]):
-            flash(request, "كلمة السر الحالية غلط", "error")
+            flash(request, "كلمة السر الحالية غير صحيحة", "error")
         elif len(new) < 6:
-            flash(request, "كلمة السر الجديدة لازم تكون 6 حروف على الأقل", "error")
+            flash(request, "يجب ألا تقل كلمة السر الجديدة عن 6 أحرف", "error")
         else:
             db.execute("UPDATE users SET password_hash=? WHERE id=?",
                        (dbm.hash_password(new), user["id"]))
-            flash(request, "اتغيرت كلمة السر")
+            flash(request, "تم تغيير كلمة السر")
         return go("/account")
 
 
@@ -261,7 +270,7 @@ def upload_form(request: Request, custody_id: int | None = None):
         custodies = db.execute("SELECT * FROM custodies WHERE user_id=? AND active=1",
                                (user["id"],)).fetchall()
         if not custodies:
-            flash(request, "مفيش عهدة مسجلة باسمك. كلم مدير النظام.", "error")
+            flash(request, "لا توجد عهدة مسجلة باسمك. تواصل مع مدير النظام.", "error")
             return go("/me")
         return render(request, db, "upload.html", user=user, custodies=custodies,
                       selected=custody_id or custodies[0]["id"])
@@ -298,20 +307,30 @@ async def upload(request: Request, custody_id: int = Form(...), image: UploadFil
             raise HTTPException(404)
         pdf_text = ""
         image_bytes = raw
+        log.info("رفع فاتورة: %s نوع=%s حجم=%d", image.filename, image.content_type, len(raw))
         if pdftext.is_pdf(raw):
             try:
                 image_bytes = pdftext.render_first_page(raw)
                 pdf_text = pdftext.extract_text(raw)
             except Exception:
-                flash(request, "مقدرتش أفتح ملف الـ PDF ده.", "error")
+                log.exception("فشل فتح PDF")
+                flash(request, "تعذّر فتح ملف PDF هذا.", "error")
                 return go(f"/upload?custody_id={custody_id}")
         try:
             prepared, media_type = prepare_image(image_bytes)
         except Exception:
-            flash(request, "الملف ده مش صورة ولا PDF. صوّر الفاتورة تاني.", "error")
+            log.exception("فشل فتح الصورة %s (%s)", image.filename, image.content_type)
+            kind = (image.content_type or "").lower() + " " + (image.filename or "").lower()
+            if "heic" in kind or "heif" in kind:
+                flash(request, "صيغة صور الآيفون (HEIC) غير مدعومة على هذا الجهاز. من إعدادات الكاميرا اختر "
+                               "«الأكثر توافقاً» (Most Compatible) أو ارفع الصورة من المعرض.", "error")
+            else:
+                flash(request, "هذا الملف ليس صورة ولا PDF. صوّر الفاتورة مرة أخرى.", "error")
             return go(f"/upload?custody_id={custody_id}")
-        if pdf_text:
-            save_file(raw, "inv", ".pdf")
+        original = save_file(raw, "inv", ".pdf") if pdftext.is_pdf(raw) else ""
+        if not original and raw[:3] != b"\xff\xd8\xff" and raw[:4] != b"\x89PNG":
+            # صيغ زي HEIC/WebP: نحولها JPEG بحجم كبير عشان قراءة QR والنص
+            image_bytes = prepare_image(raw, max_side=4000)[0]
         cats = [c["name"] for c in categories(db)]
         api_key = get_setting(db, "anthropic_api_key")
         model = get_setting(db, "anthropic_model", DEFAULT_MODEL)
@@ -324,9 +343,17 @@ async def upload(request: Request, custody_id: int = Form(...), image: UploadFil
         rel = save_image(prepared, "inv")
         db.commit()  # متمسكش قفل القاعدة أثناء القراءة الذكية
 
-    ext = extract_invoice(prepared, media_type, api_key=api_key, model=model,
-                          categories=cats, original_bytes=image_bytes, pdf_text=pdf_text,
-                          own_company=own)
+    try:
+        ext = extract_invoice(prepared, media_type, api_key=api_key, model=model,
+                              categories=cats, original_bytes=image_bytes, pdf_text=pdf_text,
+                              own_company=own, photo=not pdftext.is_pdf(raw))
+    except Exception:
+        log.exception("فشلت قراءة الفاتورة")
+        from .extract import Extraction
+        ext = Extraction()
+        ext.notes.append("حدث خطأ أثناء قراءة الفاتورة، أدخل البيانات يدوياً")
+    log.info("نتيجة القراءة: مصادر=%s إجمالي=%s مورد=%s ملاحظات=%s",
+             ext.sources, ext.total, ext.vendor_name, ext.notes)
 
     with get_db() as db:
         vendor_id = dbm.find_or_create_vendor(db, ext.vendor_name, ext.vendor_vat_number)
@@ -334,13 +361,13 @@ async def upload(request: Request, custody_id: int = Form(...), image: UploadFil
         cur = db.execute(
             """INSERT INTO invoices(week_id,custody_id,user_id,vendor_id,category_id,invoice_number,
                  invoice_date,subtotal,vat_amount,total,image_path,image_sha256,
-                 extraction_source,extraction_raw,department_id)
+                 extraction_source,extraction_raw,department_id,original_path)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                       (SELECT department_id FROM custodies WHERE id=?))""",
+                       (SELECT department_id FROM custodies WHERE id=?),?)""",
             (week["id"], custody_id, user["id"], vendor_id, cat["id"] if cat else None,
              ext.invoice_number, ext.invoice_date, ext.subtotal, ext.vat_amount, ext.total,
              rel, sha, ext.source_label,
-             json.dumps({"raw": ext.raw, "notes": ext.notes}, ensure_ascii=False), custody_id),
+             json.dumps({"raw": ext.raw, "notes": ext.notes}, ensure_ascii=False), custody_id, original),
         )
         inv_id = cur.lastrowid
         for it in ext.items:
@@ -352,7 +379,7 @@ async def upload(request: Request, custody_id: int = Form(...), image: UploadFil
         for note in ext.notes:
             flash(request, note, "warn")
         if ext.sources:
-            flash(request, "اتقرت بيانات الفاتورة. راجعها وعدّل أي غلط وبعدين ابعت.")
+            flash(request, "تمت قراءة بيانات الفاتورة. راجعها وصحّح أي خطأ ثم أرسلها.")
         return go(f"/invoices/{inv_id}/edit")
 
 
@@ -374,11 +401,11 @@ def load_invoice(db, invoice_id: int, user, for_edit: bool = False):
         (invoice_id,),
     ).fetchone()
     if not inv:
-        raise HTTPException(404, "الفاتورة مش موجودة")
+        raise HTTPException(404, "الفاتورة غير موجودة")
     if user["role"] != "admin" and inv["user_id"] != user["id"]:
         raise HTTPException(403)
     if for_edit and user["role"] != "admin" and inv["status"] not in ("draft", "pending"):
-        raise HTTPException(403, "الفاتورة اتراجعت ومينفعش تتعدل")
+        raise HTTPException(403, "تمت مراجعة الفاتورة ولا يمكن تعديلها")
     return inv
 
 
@@ -416,7 +443,7 @@ async def invoice_edit(request: Request, invoice_id: int):
             subtotal = round(total - vat, 2)
         action = form.get("action", "save")
         if action == "submit" and (total is None or total <= 0):
-            flash(request, "لازم تكتب إجمالي الفاتورة قبل ما تبعتها", "error")
+            flash(request, "يجب إدخال إجمالي الفاتورة قبل إرسالها", "error")
             return go(f"/invoices/{invoice_id}/edit")
         vendor_id = dbm.find_or_create_vendor(db, form.get("vendor_name", ""),
                                               form.get("vendor_vat_number", ""),
@@ -458,15 +485,15 @@ async def invoice_edit(request: Request, invoice_id: int):
             raised = run_invoice_checks(db, invoice_id)
             statement.match_week(db, week_id)
             if "over_limit" in raised:
-                flash(request, "اتبعتت. الفاتورة أكبر من الحد المسموح، فاتبعت تنبيه للمدير.", "warn")
+                flash(request, "تم الإرسال. الفاتورة تتجاوز الحد المسموح، لذا أُرسل تنبيه إلى المدير.", "warn")
             elif "duplicate" in raised:
-                flash(request, "اتبعتت، بس شكلها مكررة مع فاتورة قبل كده، فاتبعت تنبيه للمدير.", "warn")
+                flash(request, "تم الإرسال، لكن يبدو أنها مكررة مع فاتورة سابقة، لذا أُرسل تنبيه إلى المدير.", "warn")
             else:
-                flash(request, "الفاتورة اتبعتت للمراجعة")
+                flash(request, "تم إرسال الفاتورة للمراجعة")
             return go("/me" if user["role"] != "admin" else f"/invoices/{invoice_id}")
         if inv["status"] in ("pending", "approved") and user["role"] == "admin":
             run_invoice_checks(db, invoice_id)
-        flash(request, "اتحفظت التعديلات")
+        flash(request, "تم حفظ التعديلات")
         return go(f"/invoices/{invoice_id}" if inv["status"] != "draft" else f"/invoices/{invoice_id}/edit")
 
 
@@ -476,11 +503,13 @@ def invoice_delete(request: Request, invoice_id: int):
         user = require_user(request, db)
         inv = load_invoice(db, invoice_id, user)
         if user["role"] != "admin" and inv["status"] != "draft":
-            raise HTTPException(403, "ممكن تمسح المسودة بس")
+            raise HTTPException(403, "يمكن حذف المسودة فقط")
         db.execute("UPDATE alerts SET invoice_id=NULL WHERE invoice_id=?", (invoice_id,))
         db.execute("DELETE FROM invoices WHERE id=?", (invoice_id,))
-        (dbm.UPLOAD_DIR / inv["image_path"]).unlink(missing_ok=True)
-        flash(request, "اتمسحت الفاتورة")
+        for f in (inv["image_path"], inv["original_path"]):
+            if f:
+                (dbm.UPLOAD_DIR / f).unlink(missing_ok=True)
+        flash(request, "تم حذف الفاتورة")
         return go("/me" if user["role"] != "admin" else "/admin/invoices")
 
 
@@ -493,6 +522,20 @@ def invoice_image(request: Request, invoice_id: int):
     if not path.is_relative_to(dbm.UPLOAD_DIR.resolve()) or not path.exists():
         raise HTTPException(404)
     return FileResponse(path)
+
+
+@app.get("/invoices/{invoice_id}/original")
+def invoice_original(request: Request, invoice_id: int):
+    with get_db() as db:
+        user = require_user(request, db)
+        inv = load_invoice(db, invoice_id, user)
+        if not inv["original_path"]:
+            raise HTTPException(404)
+        path = (dbm.UPLOAD_DIR / inv["original_path"]).resolve()
+    if not path.is_relative_to(dbm.UPLOAD_DIR.resolve()) or not path.exists():
+        raise HTTPException(404)
+    return FileResponse(path, media_type="application/pdf",
+                        content_disposition_type="inline", filename=f"invoice-{invoice_id}.pdf")
 
 
 # ======================= الأسابيع =======================
@@ -551,7 +594,7 @@ async def week_statement(request: Request, week_id: int, image: UploadFile = Fil
         user = require_user(request, db)
         week = load_week(db, week_id, user)
         if week["status"] == "closed":
-            raise HTTPException(400, "الأسبوع مقفول")
+            raise HTTPException(400, "الأسبوع مغلق")
         if not raw:
             return go(f"/weeks/{week_id}")
         lines: list[dict] = []
@@ -559,7 +602,7 @@ async def week_statement(request: Request, week_id: int, image: UploadFile = Fil
             try:
                 lines = statement.parse_excel(raw)
             except Exception:
-                flash(request, "مقدرتش أفتح ملف الـ Excel ده. احفظه بصيغة xlsx وجرب تاني.", "error")
+                flash(request, "تعذّر فتح ملف Excel هذا. احفظه بصيغة xlsx وحاول مرة أخرى.", "error")
                 return go(f"/weeks/{week_id}")
             rel = save_file(raw, "stmt", ".xlsx")
             db.execute("UPDATE weeks SET statement_file=? WHERE id=?", (rel, week_id))
@@ -576,7 +619,7 @@ async def week_statement(request: Request, week_id: int, image: UploadFile = Fil
                     text = read_text(img)
                     lines = statement.parse_ocr_text(text) if text else []
             except Exception:
-                flash(request, "مقدرتش أفتح ملف الـ PDF ده.", "error")
+                flash(request, "تعذّر فتح ملف PDF هذا.", "error")
                 return go(f"/weeks/{week_id}")
         elif name.endswith(".csv"):
             lines = statement.parse_csv(raw)
@@ -586,7 +629,7 @@ async def week_statement(request: Request, week_id: int, image: UploadFile = Fil
             try:
                 prepared, _ = prepare_image(raw, max_side=2400)
             except Exception:
-                flash(request, "الملف ده مش صورة ولا Excel", "error")
+                flash(request, "هذا الملف ليس صورة ولا Excel", "error")
                 return go(f"/weeks/{week_id}")
             rel = save_image(prepared, "stmt")
             db.execute("UPDATE weeks SET statement_image=? WHERE id=?", (rel, week_id))
@@ -606,12 +649,12 @@ async def week_statement(request: Request, week_id: int, image: UploadFile = Fil
         result = statement.match_week(db, week_id)
         create_alert(db, "statement",
                      f"{week['full_name']} رفع بيان عهدة {week['custody_name']} لأسبوع {week['start_date']} "
-                     f"({len(lines)} سطر، اتربط منهم {result['matched']}).",
+                     f"({len(lines)} سطر، رُبط منها {result['matched']}).",
                      week_id=week_id)
         if lines:
-            flash(request, f"اتقرا {len(lines)} سطر من البيان، واتربط {result['matched']} منهم بفواتير. راجع المطابقة.")
+            flash(request, f"تمت قراءة {len(lines)} سطر من البيان، ورُبط {result['matched']} منها بفواتير. راجع المطابقة.")
         else:
-            flash(request, "اترفع البيان بس مقدرتش أقرا سطوره. اكتب السطور في صفحة المطابقة.", "warn")
+            flash(request, "تم رفع البيان لكن تعذّرت قراءة سطوره. أدخل السطور في صفحة المطابقة.", "warn")
         return go(f"/weeks/{week_id}/reconcile")
 
 
@@ -644,7 +687,7 @@ async def week_reconcile_save(request: Request, week_id: int):
         user = require_user(request, db)
         week = load_week(db, week_id, user)
         if week["status"] == "closed":
-            raise HTTPException(400, "الأسبوع مقفول")
+            raise HTTPException(400, "الأسبوع مغلق")
         valid = {r["id"] for r in db.execute(
             "SELECT id FROM invoices WHERE week_id=? AND status IN ('pending','approved')", (week_id,))}
         old = {r["id"]: r for r in db.execute("SELECT * FROM statement_lines WHERE week_id=?", (week_id,))}
@@ -673,7 +716,7 @@ async def week_reconcile_save(request: Request, week_id: int):
                 statement.link(db, cur.lastrowid, int(choice), how)
                 used.add(int(choice))
         result = statement.match_week(db, week_id)
-        flash(request, "اتحفظ البيان" + (f"، واتربط {result['matched']} سطر تلقائي" if result["matched"] else ""))
+        flash(request, "تم حفظ البيان" + (f"، ورُبط {result['matched']} سطر تلقائي" if result["matched"] else ""))
         return go(f"/weeks/{week_id}/reconcile")
 
 
@@ -684,7 +727,7 @@ def week_close(request: Request, week_id: int, notes: str = Form("")):
         week = load_week(db, week_id, admin)
         totals = dbm.week_totals(db, week_id)
         if totals["pending_count"]:
-            flash(request, f"فيه {totals['pending_count']} فاتورة لسه مستنية مراجعة. اعتمدها أو ارفضها الأول.", "error")
+            flash(request, f"توجد {totals['pending_count']} فاتورة ما زالت بانتظار المراجعة. اعتمدها أو ارفضها أولاً.", "error")
             return go(f"/weeks/{week_id}")
         if week["status"] == "closed":
             return go(f"/weeks/{week_id}")
@@ -692,7 +735,7 @@ def week_close(request: Request, week_id: int, notes: str = Form("")):
             "UPDATE weeks SET status='closed', closed_at=?, closed_by=?, close_notes=? WHERE id=?",
             (datetime.now().isoformat(timespec="seconds"), admin["id"], notes.strip(), week_id),
         )
-        flash(request, "اتقفل الأسبوع. أول فاتورة جديدة هتفتح أسبوع جديد بمبلغ العهدة كامل.")
+        flash(request, "تم إقفال الأسبوع. ستفتح أول فاتورة جديدة أسبوعاً جديداً بمبلغ العهدة كاملاً.")
         return go(f"/weeks/{week_id}")
 
 
@@ -704,10 +747,10 @@ def week_reopen(request: Request, week_id: int):
         other = db.execute("SELECT id FROM weeks WHERE custody_id=? AND status='open' AND id<>?",
                            (week["custody_id"], week_id)).fetchone()
         if other:
-            flash(request, "فيه أسبوع تاني مفتوح للعهدة دي. اقفله الأول.", "error")
+            flash(request, "يوجد أسبوع آخر مفتوح لهذه العهدة. أقفله أولاً.", "error")
         else:
             db.execute("UPDATE weeks SET status='open', closed_at=NULL WHERE id=?", (week_id,))
-            flash(request, "اتفتح الأسبوع تاني")
+            flash(request, "أُعيد فتح الأسبوع")
         return go(f"/weeks/{week_id}")
 
 
@@ -757,7 +800,7 @@ def week_export(request: Request, week_id: int):
             ("مبلغ العهدة", totals["opening"]), ("المصروف", totals["spent"]),
             ("منها ضريبة", totals["vat"]), ("المتبقي", totals["remaining"]),
             ("المرفوض", totals["rejected"]), ("عدد الفواتير", totals["count"]),
-            ("الحالة", "مقفول" if week["status"] == "closed" else "مفتوح")]
+            ("الحالة", "مغلق" if week["status"] == "closed" else "مفتوح")]
     for r in rows:
         ws.append(r)
         ws.cell(ws.max_row, 1).font = Font(bold=True)
@@ -773,14 +816,14 @@ def week_export(request: Request, week_id: int):
     ws3.append(["#", "التاريخ", "البيان", "المبلغ", "الفاتورة", "المورد", "إجمالي الفاتورة", "الربط"])
     for c in ws3[1]:
         c.font = Font(bold=True)
-    labels = {"auto": "بالمبلغ", "manual": "يدوي", "ambiguous": "محتاج اختيار", "none": "مفيش فاتورة"}
+    labels = {"auto": "بالمبلغ", "manual": "يدوي", "ambiguous": "يحتاج إلى اختيار", "none": "لا توجد فاتورة"}
     with get_db() as db:
         rec = statement.reconciliation(db, week_id)
     for ln in rec["lines"]:
         ws3.append([ln["line_no"], ln["line_date"], ln["description"], ln["amount"], ln["invoice_id"],
                     ln["vendor_name"], ln["inv_total"], labels.get(ln["match_status"], "")])
     for i in rec["unmatched_invoices"]:
-        ws3.append(["", i["invoice_date"], "فاتورة مش في البيان", None, i["id"], i["vendor_name"], i["total"], "مفيش سطر"])
+        ws3.append(["", i["invoice_date"], "فاتورة خارج البيان", None, i["id"], i["vendor_name"], i["total"], "لا يوجد سطر"])
     return xlsx_response(wb, f"week-{week_id}-{week['start_date']}.xlsx")
 
 
@@ -933,7 +976,7 @@ def admin_reports_export(request: Request):
               [[r["label"], r["n"], round(r["total"], 2), round(r["vat"], 2), round(r["avg"] or 0, 2),
                 round(r["share"], 1)] for r in summ[key]])
     sheet("العهد", ["الموظف", "العهدة", "القسم", "الأسابيع", "مبلغ العهدة", "المصروف", "المتبقي",
-                    "عدد الفواتير", "مستنية", "مرفوضة", "فوق الحد", "مش في البيان"],
+                    "عدد الفواتير", "قيد المراجعة", "مرفوضة", "فوق الحد", "خارج البيان"],
           [[r["full_name"], r["name"], r["department"] or "", r["weeks"], round(r["opening"], 2),
             round(r["spent"], 2), round(r["remaining"], 2), r["n"], r["pending"], r["rejected"], r["over"],
             r["unlinked"]] for r in cust])
@@ -948,13 +991,13 @@ def admin_reports_export(request: Request):
           [[it["name"], it["cheapest"]["vendor"], round(it["cheapest"]["avg"], 2), len(it["vendors"]),
             round(it["diff_pct"], 1)] for it in cheap["items"]])
     exc_rows = []
-    for label, key in (("فوق الحد", "over"), ("مكررة", "duplicates"), ("مورد من غير رقم ضريبي", "no_vat"),
+    for label, key in (("فوق الحد", "over"), ("مكررة", "duplicates"), ("مورد بلا رقم ضريبي", "no_vat"),
                        ("مرفوضة", "rejected")):
         for r in exc[key]:
             exc_rows.append([label, r["id"], r["d"], r["full_name"], r["vendor"] or "", r["invoice_number"] or "",
                              r["total"], STATUS_LABELS[r["status"]]])
     for r in exc["unmatched_lines"]:
-        exc_rows.append(["سطر في البيان من غير فاتورة", "", r["line_date"], r["full_name"], r["description"],
+        exc_rows.append(["سطر في البيان بلا فاتورة", "", r["line_date"], r["full_name"], r["description"],
                          "", r["amount"], ""])
     sheet("الاستثناءات", ["النوع", "#", "التاريخ", "الموظف", "المورد / البيان", "رقم الفاتورة", "المبلغ", "الحالة"],
           exc_rows)
@@ -1047,15 +1090,15 @@ def admin_review(request: Request, invoice_id: int, decision: str = Form(...),
         admin = require_admin(request, db)
         inv = load_invoice(db, invoice_id, admin)
         if inv["week_status"] == "closed":
-            flash(request, "الأسبوع ده مقفول. افتحه الأول لو عاوز تغير القرار.", "error")
+            flash(request, "هذا الأسبوع مغلق. أعد فتحه أولاً إذا أردت تغيير القرار.", "error")
             return go(f"/invoices/{invoice_id}")
         db.execute(
             "UPDATE invoices SET status=?, review_notes=?, reviewed_by=?, reviewed_at=? WHERE id=?",
             (decision, notes.strip(), admin["id"], datetime.now().isoformat(timespec="seconds"), invoice_id),
         )
         db.execute("UPDATE alerts SET is_read=1 WHERE invoice_id=?", (invoice_id,))
-        flash(request, {"approved": "اتعتمدت الفاتورة", "rejected": "اترفضت الفاتورة",
-                        "pending": "رجعت للمراجعة"}[decision])
+        flash(request, {"approved": "تم اعتماد الفاتورة", "rejected": "تم رفض الفاتورة",
+                        "pending": "أُعيدت إلى المراجعة"}[decision])
         return go(next if next.startswith("/") else f"/invoices/{invoice_id}")
 
 
@@ -1079,10 +1122,10 @@ def admin_user_create(request: Request, full_name: str = Form(...), username: st
         require_admin(request, db)
         username = username.strip().lower()
         if db.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone():
-            flash(request, "اسم الدخول ده مستخدم قبل كده", "error")
+            flash(request, "اسم الدخول هذا مستخدم من قبل", "error")
             return go("/admin/users")
         if len(password) < 6:
-            flash(request, "كلمة السر لازم تكون 6 حروف على الأقل", "error")
+            flash(request, "يجب ألا تقل كلمة السر عن 6 أحرف", "error")
             return go("/admin/users")
         cur = db.execute(
             "INSERT INTO users(username,full_name,phone,email,role,password_hash) VALUES (?,?,?,?,?,?)",
@@ -1095,7 +1138,7 @@ def admin_user_create(request: Request, full_name: str = Form(...), username: st
                 "INSERT INTO custodies(user_id,name,weekly_amount,per_invoice_limit) VALUES (?,?,?,?)",
                 (cur.lastrowid, f"عهدة {full_name.strip()}", amount, limit),
             )
-        flash(request, f"اتضاف {full_name}")
+        flash(request, f"تمت إضافة {full_name}")
         return go("/admin/users")
 
 
@@ -1108,20 +1151,20 @@ def admin_user_update(request: Request, user_id: int, action: str = Form(...),
         if action == "update":
             db.execute("UPDATE users SET full_name=?, phone=?, email=? WHERE id=?",
                        (full_name.strip(), phone.strip(), email.strip(), user_id))
-            flash(request, "اتحفظت البيانات")
+            flash(request, "تم حفظ البيانات")
         elif action == "password":
             if len(password) < 6:
-                flash(request, "كلمة السر لازم تكون 6 حروف على الأقل", "error")
+                flash(request, "يجب ألا تقل كلمة السر عن 6 أحرف", "error")
             else:
                 db.execute("UPDATE users SET password_hash=? WHERE id=?",
                            (dbm.hash_password(password), user_id))
-                flash(request, "اتغيرت كلمة السر")
+                flash(request, "تم تغيير كلمة السر")
         elif action == "toggle":
             if user_id == admin["id"]:
-                flash(request, "مينفعش توقف حسابك", "error")
+                flash(request, "لا يمكنك إيقاف حسابك", "error")
             else:
                 db.execute("UPDATE users SET active=1-active WHERE id=?", (user_id,))
-                flash(request, "اتغيرت حالة الحساب")
+                flash(request, "تم تغيير حالة الحساب")
         return go("/admin/users")
 
 
@@ -1149,11 +1192,11 @@ def admin_custody_create(request: Request, user_id: int = Form(...), name: str =
         require_admin(request, db)
         amount, limit = to_float(weekly_amount), to_float(per_invoice_limit)
         if not amount or not limit:
-            flash(request, "اكتب مبلغ العهدة والحد بالأرقام", "error")
+            flash(request, "أدخل مبلغ العهدة والحد بالأرقام", "error")
             return go("/admin/custodies")
         db.execute("INSERT INTO custodies(user_id,name,weekly_amount,per_invoice_limit,department_id)"
                    " VALUES (?,?,?,?,?)", (user_id, name.strip(), amount, limit, department_id or None))
-        flash(request, "اتضافت العهدة")
+        flash(request, "تمت إضافة العهدة")
         return go("/admin/custodies")
 
 
@@ -1166,8 +1209,8 @@ def admin_custody_update(request: Request, custody_id: int, action: str = Form("
         if action == "delete":
             # حذف نهائي للعهدة وكل اللي عليها (المدير بيأكد قبلها في المتصفح)
             inv_ids = [r[0] for r in db.execute("SELECT id FROM invoices WHERE custody_id=?", (custody_id,))]
-            files = [r[0] for r in db.execute(
-                "SELECT image_path FROM invoices WHERE custody_id=? AND image_path!=''", (custody_id,))]
+            files = [f for r in db.execute(
+                "SELECT image_path, original_path FROM invoices WHERE custody_id=?", (custody_id,)) for f in r if f]
             week_ids = [r[0] for r in db.execute("SELECT id FROM weeks WHERE custody_id=?", (custody_id,))]
             for w in db.execute("SELECT statement_image, statement_file FROM weeks WHERE custody_id=?", (custody_id,)):
                 files += [f for f in (w[0], w[1]) if f]
@@ -1187,20 +1230,20 @@ def admin_custody_update(request: Request, custody_id: int, action: str = Form("
                     (dbm.UPLOAD_DIR / f).unlink(missing_ok=True)
                 except OSError:
                     pass
-            flash(request, f"اتحذفت العهدة ومعاها {len(inv_ids)} فاتورة")
+            flash(request, f"تم حذف العهدة ومعها {len(inv_ids)} فاتورة")
             return go("/admin/custodies")
         if action == "toggle":
             db.execute("UPDATE custodies SET active=1-active WHERE id=?", (custody_id,))
         else:
             amount, limit = to_float(weekly_amount), to_float(per_invoice_limit)
             if not amount or not limit:
-                flash(request, "اكتب مبلغ العهدة والحد بالأرقام", "error")
+                flash(request, "أدخل مبلغ العهدة والحد بالأرقام", "error")
                 return go("/admin/custodies")
             db.execute("UPDATE custodies SET name=?, weekly_amount=?, per_invoice_limit=?, department_id=?"
                        " WHERE id=?", (name.strip(), amount, limit, department_id or None, custody_id))
             db.execute("UPDATE weeks SET opening_amount=? WHERE custody_id=? AND status='open'",
                        (amount, custody_id))
-        flash(request, "اتحفظت العهدة")
+        flash(request, "تم حفظ العهدة")
         return go("/admin/custodies")
 
 
@@ -1265,13 +1308,13 @@ def custody_review(request: Request, q: str = "", user_id: str = "", department_
             totals = dbm.week_totals(db, week["id"]) if week else None
             issues = []
             if c["pending"]:
-                issues.append(f"{c['pending']} فاتورة مستنية")
+                issues.append(f"{c['pending']} فاتورة قيد المراجعة")
             if c["over"]:
                 issues.append(f"{c['over']} فوق الحد")
             if c["unmatched_lines"]:
-                issues.append(f"{c['unmatched_lines']} سطر بيان من غير فاتورة")
+                issues.append(f"{c['unmatched_lines']} سطر بيان بلا فاتورة")
             if totals and totals["remaining"] < 0:
-                issues.append("صرف أكتر من العهدة")
+                issues.append("صرف يتجاوز العهدة")
             if attention and not issues:
                 continue
             rows.append({"c": c, "week": week, "totals": totals, "issues": issues})
@@ -1295,7 +1338,7 @@ def custody_review_detail(request: Request, custody_id: int, date_from: str = ""
                JOIN users u ON u.id=c.user_id LEFT JOIN departments d ON d.id=c.department_id WHERE c.id=?""",
             (custody_id,)).fetchone()
         if not c:
-            raise HTTPException(404, "العهدة مش موجودة")
+            raise HTTPException(404, "العهدة غير موجودة")
         wwhere, wparams = ["w.custody_id=?"], [custody_id]
         if date_from:
             wwhere.append("w.end_date>=?")
@@ -1427,11 +1470,11 @@ def admin_vendor_update(request: Request, vendor_id: int, name: str = Form(...),
         if target and int(target) != vendor_id:
             db.execute("UPDATE invoices SET vendor_id=? WHERE vendor_id=?", (int(target), vendor_id))
             db.execute("DELETE FROM vendors WHERE id=?", (vendor_id,))
-            flash(request, "اتدمج المورد")
+            flash(request, "تم دمج المورد")
             return go(f"/admin/vendors/{int(target)}")
         db.execute("UPDATE vendors SET name=?, vat_number=? WHERE id=?",
                    (dbm.normalize_vendor_name(name), vat_number.strip(), vendor_id))
-        flash(request, "اتحفظ المورد")
+        flash(request, "تم حفظ المورد")
         return go(f"/admin/vendors/{vendor_id}")
 
 
@@ -1492,7 +1535,7 @@ async def admin_settings_save(request: Request):
                 if key in ("anthropic_api_key", "smtp_password") and value == "********":
                     continue
                 set_setting(db, key, value)
-        flash(request, "اتحفظت الإعدادات")
+        flash(request, "تم حفظ الإعدادات")
         return go("/admin/settings")
 
 
@@ -1526,25 +1569,25 @@ def admin_lists_save(request: Request, table: str, action: str = Form("add"), na
                 db.execute(f"UPDATE {table} SET active=1 WHERE id=?", (row["id"],))
             else:
                 db.execute(f"INSERT INTO {table}(name) VALUES (?)", (name,))
-            flash(request, f"اتضاف {LIST_TABLES[table]}: {name}")
+            flash(request, f"تمت إضافة {LIST_TABLES[table]}: {name}")
         elif action == "rename" and name and item_id:
             try:
                 db.execute(f"UPDATE {table} SET name=? WHERE id=?", (name, item_id))
-                flash(request, "اتحفظ الاسم")
+                flash(request, "تم حفظ الاسم")
             except sqlite3.IntegrityError:
-                flash(request, "الاسم ده موجود قبل كده", "error")
+                flash(request, "هذا الاسم موجود من قبل", "error")
         elif action == "toggle" and item_id:
             db.execute(f"UPDATE {table} SET active=1-active WHERE id=?", (item_id,))
-            flash(request, "اتغيرت الحالة")
+            flash(request, "تم تغيير الحالة")
         elif action == "delete" and item_id:
             used = db.execute(f"SELECT COUNT(*) FROM invoices WHERE {col}=?", (item_id,)).fetchone()[0]
             if used:
-                flash(request, "مينفعش يتمسح لأن عليه فواتير. تقدر توقفه بدل المسح.", "error")
+                flash(request, "لا يمكن حذفه لارتباطه بفواتير. يمكنك إيقافه بدلاً من الحذف.", "error")
             else:
                 if table == "departments":
                     db.execute("UPDATE custodies SET department_id=NULL WHERE department_id=?", (item_id,))
                 db.execute(f"DELETE FROM {table} WHERE id=?", (item_id,))
-                flash(request, "اتمسح")
+                flash(request, "تم الحذف")
         return go("/admin/lists")
 
 

@@ -6,7 +6,7 @@
   {% if user.role == 'admin' or inv.status in ('draft','pending') %}<a class="btn sm" href="/invoices/{{ inv.id }}/edit">تعديل</a>{% endif %}
 </div>
 <div class="split">
-  <div class="card"><a href="/invoices/{{ inv.id }}/image" target="_blank"><img class="invoice-img" src="/invoices/{{ inv.id }}/image" alt="صورة الفاتورة"></a></div>
+  <div class="card"><a href="/invoices/{{ inv.id }}/image" target="_blank"><img class="invoice-img" src="/invoices/{{ inv.id }}/image" alt="صورة الفاتورة"></a>{% if inv.original_path %}<div class="small" style="margin-top:8px"><a href="/invoices/{{ inv.id }}/original" target="_blank">📄 فتح الملف الأصلي (PDF)</a></div>{% endif %}</div>
   <div>
     <div class="card"><table>
       <tr><th>الموظف</th><td>{{ inv.full_name }} · {{ inv.custody_name }}</td></tr>
@@ -35,7 +35,7 @@
       <div class="row">
         <button class="btn ok" name="decision" value="approved">اعتماد</button>
         <button class="btn danger" name="decision" value="rejected">رفض</button>
-        {% if inv.status != 'pending' %}<button class="btn" name="decision" value="pending">رجوع للمراجعة</button>{% endif %}
+        {% if inv.status != 'pending' %}<button class="btn" name="decision" value="pending">إعادة إلى المراجعة</button>{% endif %}
       </div>
     </form>
     {% endif %}

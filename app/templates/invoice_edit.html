@@ -3,7 +3,7 @@
 <div class="row"><h1>مراجعة الفاتورة #{{ inv.id }}</h1><span class="spacer"></span>
   <span class="small muted">طريقة القراءة: {{ SOURCE_LABELS.get(inv.extraction_source, inv.extraction_source) }}</span></div>
 <div class="split">
-  <div class="card"><a href="/invoices/{{ inv.id }}/image" target="_blank"><img class="invoice-img" src="/invoices/{{ inv.id }}/image" alt="صورة الفاتورة"></a></div>
+  <div class="card"><a href="/invoices/{{ inv.id }}/image" target="_blank"><img class="invoice-img" src="/invoices/{{ inv.id }}/image" alt="صورة الفاتورة"></a>{% if inv.original_path %}<div class="small" style="margin-top:8px"><a href="/invoices/{{ inv.id }}/original" target="_blank">📄 فتح الملف الأصلي (PDF)</a></div>{% endif %}</div>
   <form class="card" method="post" action="/invoices/{{ inv.id }}/edit">
     <div class="fields">
       <div class="field"><label>اسم المورد</label><input name="vendor_name" value="{{ inv.vendor_name or '' }}"></div>
@@ -14,19 +14,19 @@
       <div class="field"><label>الضريبة (15%)</label><input name="vat_amount" id="vat" value="{{ inv.vat_amount if inv.vat_amount is not none else '' }}" inputmode="decimal" dir="ltr"></div>
       <div class="field"><label>الإجمالي شامل الضريبة *</label><input name="total" id="total" value="{{ inv.total if inv.total is not none else '' }}" inputmode="decimal" dir="ltr" required></div>
       <div class="field"><label>التصنيف</label>
-        <select name="category_id"><option value="">اختار</option>
+        <select name="category_id"><option value="">اختر</option>
           {% for c in categories %}<option value="{{ c.id }}" {% if c.id == inv.category_id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
         </select></div>
       <div class="field"><label>القسم</label>
         {% set dep = inv.department_id or inv.custody_department_id %}
-        <select name="department_id"><option value="">اختار</option>
+        <select name="department_id"><option value="">اختر</option>
           {% for d in departments %}<option value="{{ d.id }}" {% if d.id == dep %}selected{% endif %}>{{ d.name }}</option>{% endfor %}
         </select></div>
     </div>
     <div class="small muted" id="limitnote" data-limit="{{ inv.per_invoice_limit }}">حد الفاتورة الواحدة في عهدتك: <span class="num">{{ inv.per_invoice_limit|money }}</span> ريال</div>
-    <div class="field" style="margin-top:10px"><label>ملاحظة (اشتريت إيه ولمين)</label><textarea name="description" rows="2">{{ inv.description or '' }}</textarea></div>
+    <div class="field" style="margin-top:10px"><label>ملاحظة (ماذا اشتريت ولمن)</label><textarea name="description" rows="2">{{ inv.description or '' }}</textarea></div>
 
-    <details {% if items %}open{% endif %}><summary>الأصناف ({{ items|length }}) — بتساعد في مقارنة الأسعار بين الموردين</summary>
+    <details {% if items %}open{% endif %}><summary>الأصناف ({{ items|length }}) — تساعد في مقارنة الأسعار بين الموردين</summary>
       <div class="table-wrap"><table class="items-table" id="items">
         <thead><tr><th>الصنف</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead>
         <tbody>
@@ -52,8 +52,8 @@
   </form>
 </div>
 {% if inv.status == 'draft' or user.role == 'admin' %}
-<form method="post" action="/invoices/{{ inv.id }}/delete" onsubmit="return confirm('متأكد إنك عاوز تمسح الفاتورة؟')">
-  <button class="btn danger sm">مسح الفاتورة</button>
+<form method="post" action="/invoices/{{ inv.id }}/delete" onsubmit="return confirm('هل أنت متأكد من حذف الفاتورة؟')">
+  <button class="btn danger sm">حذف الفاتورة</button>
 </form>
 {% endif %}
 <script>
@@ -68,7 +68,7 @@ function check() {
   const t = parseFloat(total.value), lim = parseFloat(note.dataset.limit);
   note.style.color = (t > lim) ? 'var(--danger)' : '';
   note.querySelector('b')?.remove();
-  if (t > lim) note.insertAdjacentHTML('beforeend', ' <b>· الفاتورة دي أكبر من الحد وهيتبعت تنبيه للمدير</b>');
+  if (t > lim) note.insertAdjacentHTML('beforeend', ' <b>· هذه الفاتورة تتجاوز الحد، وسيُرسل تنبيه إلى المدير</b>');
 }
 total.addEventListener('input', () => {
   const t = parseFloat(total.value);

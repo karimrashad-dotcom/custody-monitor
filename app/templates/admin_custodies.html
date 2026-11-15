@@ -5,7 +5,7 @@
 <form method="post" action="/admin/custodies" style="margin-top:12px">
   <div class="fields">
     <div class="field"><label>الموظف</label><select name="user_id">{% for u in users %}<option value="{{ u.id }}">{{ u.full_name }}</option>{% endfor %}</select></div>
-    <div class="field"><label>اسم العهدة</label><input name="name" required placeholder="مثلاً: عهدة الصيانة"></div>
+    <div class="field"><label>اسم العهدة</label><input name="name" required placeholder="مثال: عهدة الصيانة"></div>
     <div class="field"><label>المبلغ الأسبوعي (ريال)</label><input name="weekly_amount" required inputmode="decimal" dir="ltr"></div>
     <div class="field"><label>حد الفاتورة الواحدة (ريال)</label><input name="per_invoice_limit" required inputmode="decimal" dir="ltr"></div>
     <div class="field"><label>القسم</label><select name="department_id"><option value="">بدون</option>{% for d in departments %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}</select></div>
@@ -29,10 +29,10 @@
       <form method="post" action="/admin/custodies/{{ c.id }}" style="margin-top:6px"><input type="hidden" name="action" value="toggle">
         <button class="btn sm danger">{{ 'إيقاف' if c.active else 'تفعيل' }}</button></form>
       <form method="post" action="/admin/custodies/{{ c.id }}" style="margin-top:6px"
-        onsubmit="return confirm({{ ('حذف عهدة «' ~ c.name ~ '» نهائياً' ~ ((' ومعاها ' ~ c.invoice_count ~ ' فاتورة وصورها') if c.invoice_count else '') ~ '؟ الحذف مش هيترجع.')|tojson|forceescape }})">
+        onsubmit="return confirm({{ ('حذف عهدة «' ~ c.name ~ '» نهائياً' ~ ((' ومعها ' ~ c.invoice_count ~ ' فاتورة وصورها') if c.invoice_count else '') ~ '؟ لا يمكن التراجع عن الحذف.')|tojson|forceescape }})">
         <input type="hidden" name="action" value="delete"><button class="btn sm danger">حذف</button></form>
     </details></td>
   </tr>
-  {% else %}<tr><td colspan="7" class="muted">مفيش عهد لسه.</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="7" class="muted">لا توجد عهد بعد.</td></tr>{% endfor %}
   </tbody></table></div>
 {% endblock %}

@@ -48,7 +48,7 @@ def test_delete_empty_custody(admin):
     with dbm.get_db() as db:
         cid = db.execute("SELECT id FROM custodies WHERE name='عهدة للحذف'").fetchone()[0]
     r = admin.post(f"/admin/custodies/{cid}", data={"action": "delete"})
-    assert "اتحذفت العهدة" in r.text
+    assert "تم حذف العهدة" in r.text
     with dbm.get_db() as db:
         assert not db.execute("SELECT 1 FROM custodies WHERE id=?", (cid,)).fetchone()
 
@@ -59,3 +59,21 @@ def test_delete_custody_with_invoices(admin, emp):
         cid = db.execute("SELECT id FROM custodies WHERE name LIKE 'عهدة أحمد%'").fetchone()[0]
     r = admin.get("/admin/custodies")
     assert r.text.count('value="delete"') >= 1 and "confirm(" in r.text
+
+
+def test_pdf_original_kept(emp, admin):
+    employee = emp
+    import io
+    from PIL import Image
+    img = Image.new("RGB", (400, 300), "white")
+    buf = io.BytesIO(); img.save(buf, format="PDF")
+    me = employee.get("/upload")
+    import re
+    cid = re.search(r'name="custody_id"[^>]*value="(\d+)"|value="(\d+)"[^>]*name="custody_id"|<option value="(\d+)"', me.text)
+    cid = next(g for g in cid.groups() if g)
+    r = employee.post("/upload", data={"custody_id": cid},
+                      files={"image": ("inv.pdf", buf.getvalue(), "application/pdf")})
+    assert r.status_code == 200 and "/original" in r.text
+    inv_id = re.search(r'/invoices/(\d+)/original', r.text).group(1)
+    o = employee.get(f"/invoices/{inv_id}/original")
+    assert o.status_code == 200 and o.content[:4] == b"%PDF"

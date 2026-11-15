@@ -5,7 +5,7 @@
 <form class="card" method="post" action="/admin/vendors/{{ vendor.id }}"><div class="fields">
   <div class="field"><label>الاسم</label><input name="name" value="{{ vendor.name }}"></div>
   <div class="field"><label>الرقم الضريبي</label><input name="vat_number" value="{{ vendor.vat_number }}" dir="ltr"></div>
-  <div class="field"><label>دمج في مورد رقم (لو نفس المورد مسجل مرتين)</label><input name="merge_into" inputmode="numeric" dir="ltr" placeholder="رقم المورد"></div>
-</div><button class="btn primary sm">حفظ</button> <span class="small muted">رقم المورد ده: {{ vendor.id }}</span></form>
+  <div class="field"><label>دمج في المورد رقم (إذا كان المورد نفسه مسجلاً مرتين)</label><input name="merge_into" inputmode="numeric" dir="ltr" placeholder="رقم المورد"></div>
+</div><button class="btn primary sm">حفظ</button> <span class="small muted">رقم هذا المورد: {{ vendor.id }}</span></form>
 <div class="card">{{ invoice_table(invoices, show_user=true) }}</div>
 {% endblock %}

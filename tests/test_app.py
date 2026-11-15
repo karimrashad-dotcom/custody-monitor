@@ -67,7 +67,7 @@ def test_full_cycle(admin, emp):
         "invoice_date": "2026-11-12", "subtotal": "500", "vat_amount": "75", "total": "575",
         "category_id": "2", "item_description": ["تغيير زيت", "فلتر"], "item_quantity": ["1", "2"],
         "item_unit_price": ["300", "100"], "item_line_total": ["", ""], "action": "submit"})
-    assert "أكبر من الحد" in r.text
+    assert "تتجاوز الحد" in r.text
 
     # فاتورة تانية أرخص من مورد تاني لنفس الصنف
     inv2, _ = upload(emp, tlv("ورشة النجم", "322222222200003", "2026-11-13T10:00:00Z", "230.00", "30.00"))
@@ -93,7 +93,7 @@ def test_full_cycle(admin, emp):
 
     # الإقفال مرفوض طول ما فيه فواتير مستنية
     r = admin.post("/admin/weeks/1/close", data={})
-    assert "مستنية مراجعة" in r.text
+    assert "بانتظار المراجعة" in r.text
     for i in (inv_id, inv2):
         admin.post(f"/admin/invoices/{i}/review", data={"decision": "approved"})
     admin.post(f"/admin/invoices/{inv3}/review", data={"decision": "rejected", "notes": "مكررة"})
@@ -102,7 +102,7 @@ def test_full_cycle(admin, emp):
 
     emp.post("/weeks/1/statement", files={"image": ("s.jpg", invoice_image("x"), "image/jpeg")})
     r = admin.post("/admin/weeks/1/close", data={"notes": "تمام"})
-    assert "اتقفل الأسبوع" in r.text
+    assert "تم إقفال الأسبوع" in r.text
 
     r = admin.get("/weeks/1/export.xlsx")
     assert r.status_code == 200 and r.content[:2] == b"PK"

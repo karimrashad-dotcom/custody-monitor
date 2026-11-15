@@ -8,18 +8,18 @@
   </div>
   {% else %}<input type="hidden" name="custody_id" value="{{ custodies[0].id }}">{% endif %}
   <div class="camera-box">
-    <div>صوّر الفاتورة كلها في إضاءة كويسة، أو اختار صورتها من المعرض.</div>
+    <div>صوّر الفاتورة كاملة في إضاءة جيدة، أو اختر صورتها من المعرض.</div>
     <div class="row" style="justify-content:center;margin-top:12px">
       <label class="btn primary" style="color:#fff;margin:0">📷 صوّر بالكاميرا
         <input type="file" accept="image/*" capture="environment" id="cam" hidden></label>
-      <label class="btn" style="margin:0">🖼️ اختار صورة أو PDF
+      <label class="btn" style="margin:0">🖼️ اختر صورة أو ملف PDF
         <input type="file" accept="image/*,application/pdf,.pdf" id="gal" hidden></label>
     </div>
     <input type="file" name="image" accept="image/*,application/pdf,.pdf" required id="img" style="position:absolute;opacity:0;width:1px;height:1px">
     <img id="preview" alt="">
   </div>
   <div style="margin-top:14px"><button class="btn primary big" id="send">اقرأ الفاتورة</button></div>
-  <div class="loading" id="loading">جاري قراءة الفاتورة… ممكن تاخد لحد 30 ثانية</div>
+  <div class="loading" id="loading">جارٍ قراءة الفاتورة… قد يستغرق ذلك حتى 30 ثانية</div>
 </form>
 <script>
 const img = document.getElementById('img'), prev = document.getElementById('preview');

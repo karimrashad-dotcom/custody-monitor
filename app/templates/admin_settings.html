@@ -6,35 +6,35 @@
   <div class="fields">
     <div class="field"><label>اسم الشركة</label><input name="company_name" value="{{ v.company_name }}"></div>
     <div class="field"><label>الرقم الضريبي للشركة</label><input name="company_vat_number" value="{{ v.company_vat_number }}" dir="ltr" inputmode="numeric"></div>
-    <div class="field"><label>الأسبوع بيبدأ يوم</label><select name="week_start_weekday">
+    <div class="field"><label>يبدأ الأسبوع يوم</label><select name="week_start_weekday">
       {% for k, d in [('5','السبت'),('6','الأحد'),('0','الاثنين')] %}<option value="{{ k }}" {% if v.week_start_weekday == k %}selected{% endif %}>{{ d }}</option>{% endfor %}</select></div>
   </div>
-  <p class="small muted">اسم الشركة ورقمها الضريبي بيساعدوا البرنامج يفرق بين شركتنا (العميل) والمورد في الفاتورة. اكتب الاسم زي ما بيظهر في الفواتير، عربي وإنجليزي لو الاتنين.</p>
+  <p class="small muted">يساعد اسم الشركة ورقمها الضريبي البرنامج على التمييز بين شركتنا (العميل) والمورد في الفاتورة. اكتب الاسم كما يظهر في الفواتير، بالعربية والإنجليزية إن وُجدا.</p>
   <h2>الكلمات المفتاحية لقراءة الفاتورة</h2>
-  <p class="small muted">البرنامج بيدور على الكلمات دي في الفاتورة وياخد الرقم اللي جنبها. الكلمات الموجودة مكتوبة تحت كل خانة، ولو فواتيركم بتستخدم كلمة تانية ضيفها هنا (افصل بين الكلمات بفاصلة).</p>
+  <p class="small muted">يبحث البرنامج عن هذه الكلمات في الفاتورة ويأخذ الرقم المجاور لها. الكلمات المعتمدة مكتوبة أسفل كل خانة، وإذا كانت فواتيركم تستخدم كلمة أخرى فأضفها هنا (افصل بين الكلمات بفاصلة).</p>
   <div class="fields">
-    {% for key, label in [('vendor','اسم المورد (السطر اللي فيه الكلمة)'),('invoice_no','رقم الفاتورة'),('subtotal','المبلغ قبل الضريبة'),('vat','مبلغ الضريبة'),('total','الإجمالي شامل الضريبة')] %}
+    {% for key, label in [('vendor','اسم المورد (السطر الذي يحتوي على الكلمة)'),('invoice_no','رقم الفاتورة'),('subtotal','المبلغ قبل الضريبة'),('vat','مبلغ الضريبة'),('total','الإجمالي شامل الضريبة')] %}
     <div class="field"><label>{{ label }}</label>
       <input name="kw_{{ key }}" value="{{ v['kw_' ~ key] }}" placeholder="كلمات إضافية">
       <div class="small muted">موجود: {{ kw_defaults[key] | join('، ') }}</div></div>
     {% endfor %}
   </div>
   <h2>القراءة المجانية (Tesseract)</h2>
-  {% if ocr.installed and ocr.arabic %}<div class="flash ok">شغالة: البرنامج بيقرا صور الفواتير على الجهاز ده من غير نت ومن غير تكلفة.</div>
-  {% elif ocr.installed %}<div class="flash warn">Tesseract متثبت بس من غير اللغة العربية، فهيقرا الأرقام والإنجليزي بس. ضيف ملف ara.traineddata لفولدر tessdata.</div>
-  {% else %}<div class="flash warn">Tesseract مش متثبت. على Windows: <code dir="ltr">winget install -e --id UB-Mannheim.TesseractOCR</code> وضيف اللغة العربية.</div>{% endif %}
-  <p class="small muted">بتقرا الرقم الضريبي والتاريخ والإجمالي والضريبة ورقم الفاتورة واسم المورد بشكل تقريبي، والموظف بيراجعها. بتشتغل بس لو مفيش مفتاح Claude.</p>
-  <h2>القراءة الذكية للفواتير (Claude، اختياري بفلوس)</h2>
-  <p class="small muted">من غير مفتاح، البرنامج بيقرا كود QR بتاع الفاتورة الإلكترونية بس، والباقي يدوي. المفتاح بيتعمل من console.anthropic.com وده حساب منفصل عن اشتراك Pro، بيتحاسب بالاستخدام.</p>
+  {% if ocr.installed and ocr.arabic %}<div class="flash ok">مفعّلة: يقرأ البرنامج صور الفواتير على هذا الجهاز دون إنترنت ودون تكلفة.</div>
+  {% elif ocr.installed %}<div class="flash warn">Tesseract مثبّتة لكن دون اللغة العربية، لذا ستقرأ الأرقام والإنجليزية فقط. أضف الملف ara.traineddata إلى مجلد tessdata.</div>
+  {% else %}<div class="flash warn">Tesseract غير مثبّتة. على Windows: <code dir="ltr">winget install -e --id UB-Mannheim.TesseractOCR</code> وأضف اللغة العربية.</div>{% endif %}
+  <p class="small muted">تقرأ الرقم الضريبي والتاريخ والإجمالي والضريبة ورقم الفاتورة واسم المورد بشكل تقريبي، ويراجعها الموظف. تعمل فقط في حال عدم وجود مفتاح Claude.</p>
+  <h2>القراءة الذكية للفواتير (Claude، اختيارية ومدفوعة)</h2>
+  <p class="small muted">بدون مفتاح يقرأ البرنامج رمز QR للفاتورة الإلكترونية فقط، ويُدخَل الباقي يدوياً. يُنشأ المفتاح من console.anthropic.com، وهو حساب منفصل عن اشتراك Pro ويُحاسَب حسب الاستخدام.</p>
   <div class="fields">
     <div class="field"><label>مفتاح API</label><input name="anthropic_api_key" type="password" value="{{ '********' if v.anthropic_api_key else '' }}" dir="ltr" autocomplete="off"></div>
     <div class="field"><label>الموديل</label><select name="anthropic_model">
-      {% for k, d in [('claude-haiku-5-5','Haiku: الأرخص (أقل من دولار في الشهر تقريباً)'),('claude-sonnet-5-5','Sonnet: متوسط'),('claude-opus-5-5','Opus: الأدق للخط اليدوي (أغلى)')] %}<option value="{{ k }}" {% if v.anthropic_model == k %}selected{% endif %}>{{ d }}</option>{% endfor %}</select></div>
+      {% for k, d in [('claude-haiku-5-5','Haiku: الأرخص (أقل من دولار شهرياً تقريباً)'),('claude-sonnet-5-5','Sonnet: متوسط'),('claude-opus-5-5','Opus: الأدق للخط اليدوي (الأعلى تكلفة)')] %}<option value="{{ k }}" {% if v.anthropic_model == k %}selected{% endif %}>{{ d }}</option>{% endfor %}</select></div>
   </div>
-  <h2>تنبيهات الإيميل (اختياري)</h2>
-  <p class="small muted">التنبيهات بتظهر جوه البرنامج دايماً. لو عاوزها توصل إيميل كمان املا البيانات دي (مثلاً من Outlook أو Gmail).</p>
+  <h2>تنبيهات البريد الإلكتروني (اختيارية)</h2>
+  <p class="small muted">تظهر التنبيهات داخل البرنامج دائماً. إذا أردت وصولها إلى البريد الإلكتروني أيضاً فأدخل البيانات التالية (مثلاً من Outlook أو Gmail).</p>
   <div class="fields">
-    <div class="field"><label>إيميل استلام التنبيهات</label><input name="alert_email" value="{{ v.alert_email }}" dir="ltr"></div>
+    <div class="field"><label>البريد الإلكتروني لاستقبال التنبيهات</label><input name="alert_email" value="{{ v.alert_email }}" dir="ltr"></div>
     <div class="field"><label>SMTP server</label><input name="smtp_host" value="{{ v.smtp_host }}" dir="ltr" placeholder="smtp.office365.com"></div>
     <div class="field"><label>Port</label><input name="smtp_port" value="{{ v.smtp_port or '587' }}" dir="ltr"></div>
     <div class="field"><label>اسم المستخدم</label><input name="smtp_user" value="{{ v.smtp_user }}" dir="ltr"></div>
@@ -44,5 +44,5 @@
   </div>
   <button class="btn primary">حفظ الإعدادات</button>
 </form>
-<div class="card"><b>التصنيفات والأقسام</b> بقت ليها صفحة لوحدها: <a href="/admin/lists">التصنيفات والأقسام</a></div>
+<div class="card"><b>التصنيفات والأقسام</b> أصبحت لها صفحة مستقلة: <a href="/admin/lists">التصنيفات والأقسام</a></div>
 {% endblock %}

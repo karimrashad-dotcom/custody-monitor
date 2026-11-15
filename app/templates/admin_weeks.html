@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="row"><h1>الأسابيع</h1><span class="spacer"></span>
-  {% for k, v in [('open','المفتوحة'),('closed','المقفولة'),('all','الكل')] %}<a class="btn sm {% if status == k %}primary{% endif %}" href="?status={{ k }}">{{ v }}</a>{% endfor %}</div>
+  {% for k, v in [('open','المفتوحة'),('closed','المغلقة'),('all','الكل')] %}<a class="btn sm {% if status == k %}primary{% endif %}" href="?status={{ k }}">{{ v }}</a>{% endfor %}</div>
 <div class="card table-wrap"><table>
-  <thead><tr><th>الموظف</th><th>العهدة</th><th>من</th><th class="hide-sm">إلى</th><th>المصروف</th><th>المتبقي</th><th class="hide-sm">مستنية</th><th class="hide-sm">الكشف</th><th>الحالة</th></tr></thead>
+  <thead><tr><th>الموظف</th><th>العهدة</th><th>من</th><th class="hide-sm">إلى</th><th>المصروف</th><th>المتبقي</th><th class="hide-sm">قيد المراجعة</th><th class="hide-sm">الكشف</th><th>الحالة</th></tr></thead>
   <tbody>
   {% for r in rows %}
   <tr>
@@ -13,8 +13,8 @@
     <td class="num" {% if r.totals.remaining < 0 %}style="color:var(--danger)"{% endif %}>{{ r.totals.remaining|money }}</td>
     <td class="hide-sm num">{{ r.totals.pending_count }}</td>
     <td class="hide-sm">{{ '✓' if r.week.statement_image else '—' }}</td>
-    <td><span class="pill {{ r.week.status }}">{{ 'مفتوح' if r.week.status == 'open' else 'مقفول' }}</span></td>
+    <td><span class="pill {{ r.week.status }}">{{ 'مفتوح' if r.week.status == 'open' else 'مغلق' }}</span></td>
   </tr>
-  {% else %}<tr><td colspan="9" class="muted">مفيش أسابيع.</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="9" class="muted">لا توجد أسابيع.</td></tr>{% endfor %}
   </tbody></table></div>
 {% endblock %}

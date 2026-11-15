@@ -73,3 +73,27 @@ def test_ocr_on_photo():
     assert res.vendor_vat_number == "310122393500003"
     assert res.invoice_date == "2026-11-12"
     assert res.invoice_number == "20451"
+
+
+@pytest.mark.skipif(not ocr.find_tesseract() or not CAN_DRAW_ARABIC,
+                    reason="Tesseract أو رسم العربي (libraqm) مش متاح")
+def test_ocr_on_camera_photo():
+    """صورة كاميرا: الفاتورة صغيرة في نص الصورة، مايلة، وعليها ضل."""
+    import cv2
+    page = np.array(Image.open(io.BytesIO(make_invoice([
+        "شركة الأفق للتجارة المحدودة", "Invoice No: 88213", "Date: 2026-11-10",
+        "VAT No: 310455667700003", "Subtotal 300.00", "VAT 15% 45.00", "Total 345.00"], rotate=0, blur=0.3))))
+    h, w = page.shape[:2]
+    W, H = 4000, 3000
+    bg = np.clip(np.full((H, W, 3), (70, 90, 110)) + np.random.default_rng(2).integers(-20, 20, (H, W, 3)), 0, 255).astype(np.uint8)
+    ph = H * 0.45; pw = ph * w / h; cx, cy = W / 2, H / 2
+    dst = np.float32([[cx - pw / 2 + 60, cy - ph / 2], [cx + pw / 2 - 30, cy - ph / 2 + 40], [cx + pw / 2, cy + ph / 2], [cx - pw / 2, cy + ph / 2 - 20]])
+    M = cv2.getPerspectiveTransform(np.float32([[0, 0], [w, 0], [w, h], [0, h]]), dst)
+    mask = cv2.warpPerspective(np.full((h, w), 255, np.uint8), M, (W, H))
+    out = bg.copy(); out[mask > 0] = cv2.warpPerspective(page, M, (W, H))[mask > 0]
+    out = (out * np.linspace(0.55, 1.0, W)[None, :, None]).astype(np.uint8)
+    buf = io.BytesIO(); Image.fromarray(out).save(buf, "JPEG", quality=88)
+    raw = buf.getvalue()
+    r = extract.extract_invoice(*extract.prepare_image(raw), original_bytes=raw, photo=True)
+    assert r.total == 345.0 and r.vat_amount == 45.0
+    assert r.vendor_vat_number == "310455667700003"

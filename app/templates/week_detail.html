@@ -2,26 +2,26 @@
 {% from "_macros.html" import balance, invoice_table %}
 {% block content %}
 <div class="row"><h1>{{ week.custody_name }}: أسبوع {{ week.start_date }}</h1>
-  <span class="pill {{ week.status }}">{{ 'مفتوح' if week.status == 'open' else 'مقفول' }}</span>
+  <span class="pill {{ week.status }}">{{ 'مفتوح' if week.status == 'open' else 'مغلق' }}</span>
   <span class="spacer"></span><a class="btn sm" href="/weeks/{{ week.id }}/export.xlsx">تصدير Excel</a></div>
 <div class="grid">
   <div class="card stat"><div class="label">مبلغ العهدة</div><div class="value num">{{ totals.opening|money }}</div></div>
   <div class="card stat"><div class="label">المصروف</div><div class="value num">{{ totals.spent|money }}</div><div class="sub">منها ضريبة {{ totals.vat|money }}</div></div>
   <div class="card stat"><div class="label">المتبقي</div><div class="value num" {% if totals.remaining < 0 %}style="color:var(--danger)"{% endif %}>{{ totals.remaining|money }}</div></div>
-  <div class="card stat"><div class="label">الفواتير</div><div class="value num">{{ totals.count }}</div><div class="sub">{{ totals.pending_count }} مستنية مراجعة · مرفوض {{ totals.rejected|money }}</div></div>
+  <div class="card stat"><div class="label">الفواتير</div><div class="value num">{{ totals.count }}</div><div class="sub">{{ totals.pending_count }} بانتظار المراجعة · مرفوض {{ totals.rejected|money }}</div></div>
 </div>
 <div class="card">{{ balance(totals) }}</div>
 
 <div class="split">
   <div class="card">
     <b>1. الفواتير</b>
-    <p class="small muted" style="margin:4px 0 10px">صوّر كل فاتورة. البرنامج بياخد منها المورد ورقم الفاتورة والتاريخ والمبالغ.</p>
+    <p class="small muted" style="margin:4px 0 10px">صوّر كل فاتورة، وسيأخذ البرنامج منها المورد ورقم الفاتورة والتاريخ والمبالغ.</p>
     {% if week.status == 'open' and user.id == week.user_id %}<a class="btn primary" href="/upload?custody_id={{ week.custody_id }}">📷 رفع فاتورة</a>{% endif %}
     <div class="small" style="margin-top:8px">{{ totals.count }} فاتورة بإجمالي <span class="num">{{ totals.spent|money }}</span></div>
   </div>
   <div class="card">
     <b>2. بيان العهدة</b>
-    <p class="small muted" style="margin:4px 0 10px">ارفع البيان Excel أو PDF محفوظ من Excel (دول أدق حاجة)، أو صورة. كل سطر بيتربط بفاتورة بالمبلغ، والوصف بييجي من البيان.</p>
+    <p class="small muted" style="margin:4px 0 10px">ارفع البيان بصيغة Excel أو PDF محفوظ من Excel (وهما الأدق)، أو صورة. يُربط كل سطر بفاتورة حسب المبلغ، ويؤخذ الوصف من البيان.</p>
     {% if week.status == 'open' %}
     <form method="post" action="/weeks/{{ week.id }}/statement" enctype="multipart/form-data">
       <input type="file" name="image" accept="image/*,application/pdf,.pdf,.xlsx,.xlsm,.csv" required>
@@ -37,14 +37,14 @@
 <div class="card">
   <div class="row"><b>المطابقة بين البيان والفواتير</b><span class="spacer"></span><a class="btn sm" href="/weeks/{{ week.id }}/reconcile">فتح المطابقة</a></div>
   {% if not rec.lines %}
-    <p class="muted small">لسه مفيش بيان.</p>
+    <p class="muted small">لا يوجد بيان بعد.</p>
   {% elif rec.ok %}
-    <div class="flash ok" style="margin:8px 0 0">كل سطور البيان ({{ rec.lines|length }}) مربوطة بفواتير، ومفيش فاتورة من غير سطر.</div>
+    <div class="flash ok" style="margin:8px 0 0">كل سطور البيان ({{ rec.lines|length }}) مربوطة بفواتير، ولا توجد فاتورة بلا سطر.</div>
   {% else %}
     <div class="flash warn" style="margin:8px 0 0">
-      {{ rec.matched_count }} من {{ rec.lines|length }} سطر مربوطين.
-      {% if rec.unmatched_lines %}{{ rec.unmatched_lines|length }} سطر في البيان مالوش فاتورة. {% endif %}
-      {% if rec.unmatched_invoices %}{{ rec.unmatched_invoices|length }} فاتورة مالهاش سطر في البيان.{% endif %}
+      {{ rec.matched_count }} من {{ rec.lines|length }} سطر مربوط.
+      {% if rec.unmatched_lines %}{{ rec.unmatched_lines|length }} سطر في البيان ليس له فاتورة. {% endif %}
+      {% if rec.unmatched_invoices %}{{ rec.unmatched_invoices|length }} فاتورة ليس لها سطر في البيان.{% endif %}
     </div>
   {% endif %}
   {% if rec.lines %}<div class="small muted" style="margin-top:6px">إجمالي البيان <span class="num">{{ rec.statement_total|money }}</span> · إجمالي الفواتير <span class="num">{{ totals.spent|money }}</span></div>{% endif %}
@@ -53,23 +53,23 @@
 <div class="split">
   <div class="card">
     <b>المصروف حسب التصنيف</b>
-    <table style="margin-top:6px">{% for c in by_cat %}<tr><td>{{ c.name }}</td><td class="num">{{ c.n }} فاتورة</td><td class="num">{{ c.total|money }}</td></tr>{% else %}<tr><td class="muted">مفيش مصروف.</td></tr>{% endfor %}</table>
+    <table style="margin-top:6px">{% for c in by_cat %}<tr><td>{{ c.name }}</td><td class="num">{{ c.n }} فاتورة</td><td class="num">{{ c.total|money }}</td></tr>{% else %}<tr><td class="muted">لا يوجد مصروف.</td></tr>{% endfor %}</table>
   </div>
   <div class="card">
     {% if user.role == 'admin' %}
       {% if week.status == 'open' %}
-      <form method="post" action="/admin/weeks/{{ week.id }}/close" onsubmit="return confirm('{{ 'المطابقة مش كاملة. ' if not rec.ok else '' }}إقفال الأسبوع؟ بعد الإقفال الفواتير مش هتتعدل.')">
+      <form method="post" action="/admin/weeks/{{ week.id }}/close" onsubmit="return confirm('{{ 'المطابقة غير مكتملة. ' if not rec.ok else '' }}إقفال الأسبوع؟ لن يمكن تعديل الفواتير بعد الإقفال.')">
         <b>إقفال الأسبوع</b>
         <div class="field" style="margin-top:8px"><label>ملاحظات الإقفال</label><input name="notes"></div>
         <button class="btn primary">إقفال الأسبوع</button>
       </form>
       {% else %}
-      <p class="small muted">اتقفل {{ (week.closed_at or '')[:16] }} بواسطة {{ week.closed_by_name }}{% if week.close_notes %} · {{ week.close_notes }}{% endif %}</p>
+      <p class="small muted">أُقفل {{ (week.closed_at or '')[:16] }} بواسطة {{ week.closed_by_name }}{% if week.close_notes %} · {{ week.close_notes }}{% endif %}</p>
       <form method="post" action="/admin/weeks/{{ week.id }}/reopen"><button class="btn sm">إعادة فتح</button></form>
       {% endif %}
     {% else %}
       <b>آخر الأسبوع</b>
-      <p class="small muted">ارفع البيان واتأكد إن كل السطور مربوطة، وبعدين المدير بيقفل الأسبوع.</p>
+      <p class="small muted">ارفع البيان وتأكد من ربط جميع السطور، ثم يُقفل المدير الأسبوع.</p>
     {% endif %}
   </div>
 </div>

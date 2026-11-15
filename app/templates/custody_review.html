@@ -5,18 +5,18 @@
 {% block mtitle %}مراجعة العهد{% endblock %}
 {% block content %}
 <div class="page-head"><h1>مراجعة العهد</h1>
-  <p class="muted">كل العهد ورصيدها في الأسبوع الحالي. دوس على أي عهدة عشان تشوف تفاصيلها والفواتير المربوطة بيها.</p></div>
+  <p class="muted">جميع العهد وأرصدتها في الأسبوع الحالي. اضغط على أي عهدة لعرض تفاصيلها والفواتير المرتبطة بها.</p></div>
 
 <form class="card filters" method="get" action="/admin/custody-review">
   <div class="field" style="grid-column: span 2"><label>رقم العهدة أو اسم الموظف</label>
-    <input name="q" value="{{ f.q }}" placeholder="مثلاً: 12 أو أحمد" autofocus></div>
+    <input name="q" value="{{ f.q }}" placeholder="مثال: 12 أو أحمد" autofocus></div>
   <div class="field"><label>الموظف</label><select name="user_id"><option value="">الكل</option>
     {% for u in users %}<option value="{{ u.id }}" {% if f.user_id == u.id|string %}selected{% endif %}>{{ u.full_name }}</option>{% endfor %}</select></div>
   <div class="field"><label>القسم</label><select name="department_id"><option value="">الكل</option>
     {% for d in departments %}<option value="{{ d.id }}" {% if f.department_id == d.id|string %}selected{% endif %}>{{ d.name }}</option>{% endfor %}</select></div>
   <div class="field"><label>الحالة</label><select name="active">
     {% for k, l in [('1','نشطة'),('0','موقوفة'),('','الكل')] %}<option value="{{ k }}" {% if f.active == k %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
-  <div class="field"><label class="check"><input type="checkbox" name="attention" value="1" {% if f.attention %}checked{% endif %}> محتاجة مراجعة بس</label></div>
+  <div class="field"><label class="check"><input type="checkbox" name="attention" value="1" {% if f.attention %}checked{% endif %}> التي تحتاج إلى مراجعة فقط</label></div>
   <div class="field"><button class="btn primary" style="width:100%">{{ icon('filter', 18) }} بحث</button></div>
 </form>
 
@@ -27,11 +27,11 @@
       <span class="ri-no" dir="ltr">#{{ r.c.id }}</span>
       <div class="ri-title"><b>{{ r.c.name }}</b><span class="muted small">{{ r.c.full_name }}{% if r.c.department_name %} · {{ r.c.department_name }}{% endif %}</span></div>
       {% if not r.c.active %}<span class="pill closed">موقوفة</span>{% endif %}
-      {% if r.issues %}<span class="pill flag">{{ icon('alert', 13) }} محتاجة مراجعة</span>{% else %}<span class="pill approved">{{ icon('check', 13) }} سليمة</span>{% endif %}
+      {% if r.issues %}<span class="pill flag">{{ icon('alert', 13) }} تحتاج إلى مراجعة</span>{% else %}<span class="pill approved">{{ icon('check', 13) }} سليمة</span>{% endif %}
     </div>
     <div class="ri-body">
       <div class="ri-bal">{% if r.totals %}<div class="small muted">الأسبوع الحالي {{ r.week.start_date }}</div>{{ balance(r.totals) }}
-        {% else %}<span class="muted small">لسه مفيش أسابيع</span>{% endif %}</div>
+        {% else %}<span class="muted small">لا توجد أسابيع بعد</span>{% endif %}</div>
       <dl class="ri-stats">
         <div><dt>المبلغ الأسبوعي</dt><dd class="num">{{ r.c.weekly_amount|money }}</dd></div>
         <div><dt>حد الفاتورة</dt><dd class="num">{{ r.c.per_invoice_limit|money }}</dd></div>
@@ -42,7 +42,7 @@
     {% if r.issues %}<div class="ri-issues">{% for i in r.issues %}<span>{{ i }}</span>{% endfor %}</div>{% endif %}
   </a>
 {% else %}
-  <div class="card empty">مفيش عهد بالبحث ده.</div>
+  <div class="card empty">لا توجد عهد مطابقة لهذا البحث.</div>
 {% endfor %}
 </div>
 {% endblock %}

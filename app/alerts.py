@@ -1,4 +1,4 @@
-"""التنبيهات: جوه البرنامج دايماً، وبالإيميل لو إعدادات البريد مظبوطة."""
+"""التنبيهات: جوه البرنامج دايماً، وبالبريد الإلكتروني لو إعدادات البريد مظبوطة."""
 import logging
 import smtplib
 import threading
@@ -99,7 +99,7 @@ def run_invoice_checks(db, invoice_id: int) -> list[str]:
         create_alert(
             db, "duplicate",
             f"{who} رفع فاتورة رقم {inv['invoice_number'] or '-'} من {vendor} "
-            f"شكلها مكررة مع فاتورة سابقة رقم #{dup['id']} في النظام.",
+            f"يبدو أنها مكررة مع فاتورة سابقة رقم #{dup['id']} في النظام.",
             invoice_id=invoice_id, week_id=inv["week_id"],
         )
         raised.append("duplicate")
@@ -112,8 +112,8 @@ def run_invoice_checks(db, invoice_id: int) -> list[str]:
         if not already:
             create_alert(
                 db, "over_balance",
-                f"مصروف عهدة {who} الأسبوع ده وصل {totals['spent']:,.2f} ريال "
-                f"وعدّى مبلغ العهدة {totals['opening']:,.2f} ريال.",
+                f"مصروف عهدة {who} هذا الأسبوع بلغ {totals['spent']:,.2f} ريال "
+                f"وتجاوز مبلغ العهدة {totals['opening']:,.2f} ريال.",
                 invoice_id=invoice_id, week_id=inv["week_id"],
             )
             raised.append("over_balance")

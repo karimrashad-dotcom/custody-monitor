@@ -13,7 +13,7 @@
       {% for c in categories %}<option value="{{ c.id }}" {% if f.category_id == c.id|string %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></div>
     <div class="field"><label>بحث (رقم فاتورة، مورد، رقم ضريبي)</label><input name="q" value="{{ f.q }}"></div>
   </div>
-  <div class="row"><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" name="over" value="1" style="width:auto" {% if f.over %}checked{% endif %}> فوق الحد بس</label>
+  <div class="row"><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" name="over" value="1" style="width:auto" {% if f.over %}checked{% endif %}> فوق الحد فقط</label>
     <span class="spacer"></span><button class="btn primary sm">عرض</button></div>
 </form>
 <div class="card">{{ invoice_table(invoices, show_user=true) }}</div>

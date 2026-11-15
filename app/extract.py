@@ -115,7 +115,7 @@ def from_qr(image_bytes: bytes, result: Extraction) -> None:
         return
     parsed = parse_zatca_tlv(text)
     if not parsed:
-        result.notes.append("فيه كود QR بس مش بصيغة الفاتورة الإلكترونية")
+        result.notes.append("يوجد رمز QR لكنه ليس بصيغة الفاتورة الإلكترونية")
         return
     result.sources.append("qr")
     result.raw["qr"] = parsed
@@ -212,18 +212,18 @@ def from_claude(image_bytes: bytes, media_type: str, api_key: str, model: str,
         result.notes.append("مفتاح Claude API غير صحيح، راجع الإعدادات")
         return
     except anthropic.RateLimitError:
-        result.notes.append("خدمة القراءة الذكية مشغولة، اكتب البيانات يدوياً أو جرب تاني")
+        result.notes.append("خدمة القراءة الذكية مشغولة، أدخل البيانات يدوياً أو حاول مرة أخرى")
         return
     except anthropic.APIStatusError as exc:
         log.exception("Claude API error")
         result.notes.append(f"تعذرت القراءة الذكية (خطأ {exc.status_code})")
         return
     except anthropic.APIConnectionError:
-        result.notes.append("مفيش اتصال بالإنترنت للقراءة الذكية")
+        result.notes.append("لا يوجد اتصال بالإنترنت للقراءة الذكية")
         return
 
     if response.stop_reason == "refusal":
-        result.notes.append("القراءة الذكية رفضت الصورة، اكتب البيانات يدوياً")
+        result.notes.append("رفضت القراءة الذكية الصورة، أدخل البيانات يدوياً")
         return
     text = next((b.text for b in response.content if b.type == "text"), "")
     try:
@@ -235,7 +235,7 @@ def from_claude(image_bytes: bytes, media_type: str, api_key: str, model: str,
     result.sources.append("ai")
     result.raw["ai"] = data
     if not data.get("is_invoice", True):
-        result.notes.append("الصورة دي مش شبه فاتورة")
+        result.notes.append("هذه الصورة لا تبدو فاتورة")
     # QR أدق في الأرقام والمورد، فالذكاء الاصطناعي بيكمّل الناقص بس
     if not result.invoice_number:
         result.invoice_number = (data.get("invoice_number") or "").strip()
@@ -280,13 +280,21 @@ def from_pdf_text(text: str, result: Extraction, own: dict | None = None) -> Non
 
 
 # ---------------- قراءة مجانية (Tesseract) ----------------
-def from_ocr(image_bytes: bytes, result: Extraction, own: dict | None = None) -> None:
+def from_ocr(image_bytes: bytes, result: Extraction, own: dict | None = None,
+             photo: bool = False) -> None:
     from . import ocr
 
-    text = ocr.read_text(image_bytes)
+    # صورة الكاميرا (خلفية، ضل، ميل): الأول نقص الورقة ونوحد الإضاءة، ولو منفعش نجرب الطريقة العادية
+    text = ocr.read_text(image_bytes, photo=photo)
+    data = ocr.parse_text(text, own) if text else {}
+    if data.get("total") is None and result.total is None:
+        text2 = ocr.read_text(image_bytes, photo=not photo)
+        data2 = ocr.parse_text(text2, own) if text2 else {}
+        if data2:
+            data = {**data2, **{k: v for k, v in data.items() if v not in (None, "")}}
+            text = (text or "") + "\n----\n" + text2
     if not text:
         return
-    data = ocr.parse_text(text, own)
     result.raw["ocr"] = {"fields": data, "text": text[:4000]}
     if not data:
         return
@@ -299,9 +307,21 @@ def from_ocr(image_bytes: bytes, result: Extraction, own: dict | None = None) ->
             setattr(result, key, data[key])
 
 
+def register_heif() -> bool:
+    """صور الآيفون (HEIC): تشتغل لو مكتبة pillow-heif متثبتة."""
+    try:
+        from pillow_heif import register_heif_opener
+        register_heif_opener()
+        return True
+    except Exception:
+        return False
+
+
 def prepare_image(raw: bytes, max_side: int = 2000) -> tuple[bytes, str]:
     """يعدل اتجاه الصورة ويصغرها ويحولها JPEG عشان المساحة والقراءة."""
     from PIL import Image, ImageOps
+
+    register_heif()
 
     img = Image.open(io.BytesIO(raw))
     img = ImageOps.exif_transpose(img)
@@ -316,7 +336,7 @@ def prepare_image(raw: bytes, max_side: int = 2000) -> tuple[bytes, str]:
 def extract_invoice(image_bytes: bytes, media_type: str, api_key: str = "",
                     model: str = DEFAULT_MODEL, categories: list[str] | None = None,
                     original_bytes: bytes | None = None, pdf_text: str = "",
-                    own_company: dict | None = None) -> Extraction:
+                    own_company: dict | None = None, photo: bool = False) -> Extraction:
     result = Extraction()
     # QR بيتقري أحسن من الصورة الأصلية قبل التصغير
     from_qr(original_bytes or image_bytes, result)
@@ -332,13 +352,13 @@ def extract_invoice(image_bytes: bytes, media_type: str, api_key: str = "",
                     categories or [], result)
     elif needs_ai:
         # القراءة المجانية أدق بكتير على الصورة بحجمها الكامل مش النسخة المتصغرة
-        from_ocr(original_bytes or image_bytes, result, own_company)
+        from_ocr(original_bytes or image_bytes, result, own_company, photo)
         if "ocr" not in result.sources and original_bytes:
-            from_ocr(image_bytes, result, own_company)
+            from_ocr(image_bytes, result, own_company, photo)
     if result.subtotal is None and result.total is not None and result.vat_amount is not None:
         result.subtotal = round(result.total - result.vat_amount, 2)
     if not result.sources and not api_key:
-        result.notes.append("مقدرتش أقرا الفاتورة كويس، اكتب البيانات يدوياً")
+        result.notes.append("تعذّرت قراءة الفاتورة بوضوح، أدخل البيانات يدوياً")
     elif "ocr" in result.sources:
-        result.notes.append("القراءة المجانية تقريبية، راجع الأرقام كويس قبل الإرسال")
+        result.notes.append("القراءة المجانية تقريبية، راجع الأرقام جيداً قبل الإرسال")
     return result

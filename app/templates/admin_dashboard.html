@@ -6,9 +6,9 @@
 <div class="page-head"><h1>لوحة المدير</h1>
   <div class="actions"><a class="btn" href="/admin/reports">{{ icon('chart', 18) }} التقارير</a>
   <a class="btn primary" href="/admin/invoices?status=pending">{{ icon('receipt', 18) }} مراجعة الفواتير</a></div></div>
-{% if not ai_enabled and not ocr_ok %}<div class="flash warn">قراءة صور الفواتير مش شغالة: البرنامج بيقرا QR بس. ثبّت Tesseract (مجاني) أو حط مفتاح Claude API، التفاصيل في <a href="/admin/settings">الإعدادات</a>.</div>{% endif %}
+{% if not ai_enabled and not ocr_ok %}<div class="flash warn">قراءة صور الفواتير غير مفعّلة: يقرأ البرنامج رمز QR فقط. ثبّت Tesseract (مجاني) أو أضف مفتاح Claude API، والتفاصيل في <a href="/admin/settings">الإعدادات</a>.</div>{% endif %}
 <div class="grid">
-  <a class="card stat" href="/admin/invoices?status=pending"><div class="label">{{ icon("receipt", 16) }} مستنية مراجعة</div><div class="value num">{{ pending }}</div><div class="sub">{{ over_limit }} منها فوق الحد</div></a>
+  <a class="card stat" href="/admin/invoices?status=pending"><div class="label">{{ icon("receipt", 16) }} بانتظار المراجعة</div><div class="value num">{{ pending }}</div><div class="sub">{{ over_limit }} منها فوق الحد</div></a>
   <a class="card stat" href="/admin/alerts"><div class="label">{{ icon("bell", 16) }} تنبيهات جديدة</div><div class="value num">{{ unread_alerts }}</div></a>
   <div class="card stat"><div class="label">{{ icon("wallet", 16) }} مصروف الأسبوع المفتوح</div><div class="value num">{{ open_spent|money }}</div><div class="sub">من {{ open_amount|money }} ريال عهد</div></div>
   <div class="card stat kpi accent"><div class="label">{{ icon("chart", 16) }} مصروف الشهر</div><div class="value num">{{ month_total|money }}</div></div>
@@ -21,12 +21,12 @@
   {% for r in rows %}
     <tr>
       <td>{{ r.custody.full_name }}</td><td>{{ r.custody.name }}</td>
-      <td>{% if r.totals %}{{ balance(r.totals) }}{% else %}<span class="muted small">مفيش أسبوع مفتوح (يتفتح مع أول فاتورة)</span>{% endif %}</td>
-      <td class="hide-sm num">{% if r.totals %}{{ r.totals.count }}{% if r.totals.pending_count %} <span class="pill pending">{{ r.totals.pending_count }} مستنية</span>{% endif %}{% endif %}</td>
+      <td>{% if r.totals %}{{ balance(r.totals) }}{% else %}<span class="muted small">لا يوجد أسبوع مفتوح (يُفتح مع أول فاتورة)</span>{% endif %}</td>
+      <td class="hide-sm num">{% if r.totals %}{{ r.totals.count }}{% if r.totals.pending_count %} <span class="pill pending">{{ r.totals.pending_count }} قيد المراجعة</span>{% endif %}{% endif %}</td>
       <td>{% if r.week %}<a class="btn sm" href="/weeks/{{ r.week.id }}">فتح</a>{% endif %}</td>
     </tr>
   {% else %}
-    <tr><td colspan="5" class="muted">مفيش عهد. ابدأ من <a href="/admin/users">الموظفين</a>.</td></tr>
+    <tr><td colspan="5" class="muted">لا توجد عهد. ابدأ من <a href="/admin/users">الموظفين</a>.</td></tr>
   {% endfor %}
   </tbody></table></div>
 
@@ -36,14 +36,14 @@
       <div class="small muted">{{ KIND_LABELS.get(a.kind, a.kind) }} · {{ a.created_at[:16] }}</div>
       <div>{{ a.message }}</div>
       {% if a.invoice_id %}<a class="small" href="/invoices/{{ a.invoice_id }}">عرض الفاتورة</a>{% elif a.week_id %}<a class="small" href="/weeks/{{ a.week_id }}">عرض الأسبوع</a>{% endif %}
-    </div>{% else %}<div class="card muted">مفيش تنبيهات.</div>{% endfor %}
+    </div>{% else %}<div class="card muted">لا توجد تنبيهات.</div>{% endfor %}
   </div>
   <div><h2>مصروف الشهر حسب التصنيف</h2>
     <div class="card">
     {% for c in by_cat %}
       <div style="margin-bottom:10px"><div class="row small"><span>{{ c.name }}</span><span class="spacer"></span><span class="num">{{ c.total|money }}</span></div>
       <div class="bar"><span style="width: {{ (c.total / month_total * 100) if month_total else 0 }}%"></span></div></div>
-    {% else %}<span class="muted">مفيش مصروف الشهر ده.</span>{% endfor %}
+    {% else %}<span class="muted">لا يوجد مصروف هذا الشهر.</span>{% endfor %}
     </div>
   </div>
 </div>

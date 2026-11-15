@@ -48,9 +48,9 @@ def test_statement_matching(admin, emp):
     xlsx = make_xlsx([["التاريخ", "البيان", "المبلغ"], ["2026-11-15", "تغيير زيت سيارة النقل", 500],
                       ["2026-11-16", "أدوات نظافة", 86.25], ["2026-11-17", "مواصلات", 40], ["", "الإجمالي", 626.25]])
     r = emp.post(f"/weeks/{week_id}/statement", files={"image": ("bayan.xlsx", xlsx, "application/vnd.ms-excel")})
-    assert "اتقرا 3 سطر" in r.text and "اتربط 2" in r.text
+    assert "تمت قراءة 3 سطر" in r.text and "رُبط 2" in r.text
     r = emp.get(f"/weeks/{week_id}")
-    assert "1 سطر في البيان مالوش فاتورة" in r.text
+    assert "1 سطر في البيان ليس له فاتورة" in r.text
     inv = admin.get(f"/invoices/{a}").text
     assert "تغيير زيت سيارة النقل" in inv  # الوصف جه من البيان
     # فاتورة متأخرة بنفس مبلغ السطر الناقص تتربط تلقائي لما تتبعت
@@ -62,7 +62,7 @@ def test_statement_matching(admin, emp):
     assert admin.get(f"/weeks/{week_id}/export.xlsx").status_code == 200
     # تعديل يدوي: نفك الربط من صفحة المطابقة
     page = emp.get(f"/weeks/{week_id}/reconcile").text
-    assert "اتربط بالمبلغ" in page
+    assert "رُبط بالمبلغ" in page
     r = emp.post(f"/weeks/{week_id}/reconcile", data={
         "line_id": ["", "", ""], "line_description": ["تغيير زيت", "أدوات نظافة", "مواصلات"],
         "line_amount": ["500", "86.25", "40"], "line_date": ["", "", ""], "line_invoice": [str(a), str(b), ""]})
