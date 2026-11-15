@@ -9,16 +9,16 @@ function Test-Up {
 }
 
 if (-not (Test-Up)) {
-    $py = Join-Path $root ".venv\Scripts\pythonw.exe"
-    if (-not (Test-Path $py)) { $py = Join-Path $root ".venv\Scripts\python.exe" }
+    # python.exe في نافذة مخفية (pythonw بيوقّع uvicorn لأن مفيش console)
+    $py = Join-Path $root ".venv\Scripts\python.exe"
     if (-not (Test-Path $py)) {
         # أول مرة: start.bat بيجهز كل حاجة
         Start-Process -FilePath (Join-Path $root "start.bat") -WorkingDirectory $root
     } else {
-        $log = Join-Path $root "data\server.log"
+        $log = Join-Path $root "data\uvicorn.log"
         New-Item -ItemType Directory -Force -Path (Join-Path $root "data") | Out-Null
         Start-Process -FilePath $py -WorkingDirectory $root -WindowStyle Hidden `
-            -ArgumentList "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "$Port" `
+            -ArgumentList "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "$Port", "--no-use-colors" `
             -RedirectStandardError $log
     }
     for ($i = 0; $i -lt 40 -and -not (Test-Up); $i++) { Start-Sleep -Milliseconds 500 }

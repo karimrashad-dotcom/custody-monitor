@@ -31,7 +31,8 @@ try:  # سجل أخطاء في data/server.log عشان نعرف سبب أي ف�
     _fh = RotatingFileHandler(dbm.DATA_DIR / "server.log", maxBytes=2_000_000, backupCount=2, encoding="utf-8")
     _fh.setLevel(logging.INFO)
     _fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-    logging.getLogger("app").addHandler(_fh)
+    for _name in ("app", "custody"):
+        logging.getLogger(_name).addHandler(_fh)
 except OSError:
     pass
 log = logging.getLogger("app.main")
