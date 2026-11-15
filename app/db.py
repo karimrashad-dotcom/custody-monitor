@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS users (
     role TEXT NOT NULL CHECK (role IN ('admin','employee')),
     password_hash TEXT NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS custodies (
     id INTEGER PRIMARY KEY,
@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS custodies (
     weekly_amount REAL NOT NULL,
     per_invoice_limit REAL NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS weeks (
     id INTEGER PRIMARY KEY,
@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS vendors (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     vat_number TEXT DEFAULT '',
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS invoices (
     id INTEGER PRIMARY KEY,
@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS invoices (
     review_notes TEXT DEFAULT '',
     reviewed_by INTEGER REFERENCES users(id),
     reviewed_at TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
     submitted_at TEXT
 );
 CREATE TABLE IF NOT EXISTS invoice_items (
@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS alerts (
     invoice_id INTEGER REFERENCES invoices(id),
     week_id INTEGER REFERENCES weeks(id),
     is_read INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
